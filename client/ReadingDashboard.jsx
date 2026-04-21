@@ -47,6 +47,7 @@ import PersonIcon from '@mui/icons-material/Person';
 import ArticleIcon from '@mui/icons-material/Article';
 import MonitorHeartIcon from '@mui/icons-material/MonitorHeart';
 import LaunchIcon from '@mui/icons-material/Launch';
+import DeleteIcon from '@mui/icons-material/Delete';
 
 import WorklistTable from './components/WorklistTable.jsx';
 import TatDisplay from './components/TatDisplay.jsx';
@@ -333,6 +334,12 @@ function ReadingDashboard() {
                 icon: <CompareArrowsIcon fontSize="small" />,
                 tooltip: 'Compare Priors',
                 onClick: function(r) { navigate('/dicom/studies?patient=' + get(r, 'patientDisplay', '')); }
+              },
+              {
+                icon: <DeleteIcon fontSize="small" />,
+                tooltip: 'Delete Study',
+                color: 'error',
+                onClick: function(r) { handleDeleteStudy(r._id); }
               }
             ]}
           />
@@ -485,6 +492,16 @@ function ReadingDashboard() {
   // ---------------------------------------------------------------------------
   // Event handlers
   // ---------------------------------------------------------------------------
+  async function handleDeleteStudy(studyId) {
+    if (!window.confirm('Are you sure you want to delete this imaging study?')) return;
+    try {
+      await Meteor.callAsync('removeImagingStudy', studyId);
+      console.log('[ReadingDashboard] Deleted imaging study:', studyId);
+    } catch (err) {
+      console.error('[ReadingDashboard] Error deleting imaging study:', err);
+    }
+  }
+
   function handleSelectStudy(study) {
     setSelectedStudy(study);
     setError(null);

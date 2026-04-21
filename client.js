@@ -9,6 +9,8 @@ import ReadingDashboard from './client/ReadingDashboard.jsx';
 import PatientViewFooterButtons from './client/PatientViewFooterButtons.jsx';
 import RadiologyToolsFooterButtons from './client/RadiologyToolsFooterButtons.jsx';
 import PacioExamRoomFooterButtons from './client/PacioExamRoomFooterButtons.jsx';
+import PatientDirectoryFooterButtons from './client/PatientDirectoryFooterButtons.jsx';
+import OrderHistoryFooterButtons from './client/OrderHistoryFooterButtons.jsx';
 import workflowConfig from './workflow.json';
 
 // =============================================================================
@@ -84,6 +86,14 @@ const FooterButtons = [
   {
     pathname: '/pacio-exam-room',
     element: <PacioExamRoomFooterButtons />
+  },
+  {
+    pathname: '/patient-directory',
+    element: <PatientDirectoryFooterButtons />
+  },
+  {
+    pathname: '/radiology/order-history',
+    element: <OrderHistoryFooterButtons />
   }
 ];
 
@@ -103,7 +113,9 @@ export {
   ReadingDashboard,
   PatientViewFooterButtons,
   RadiologyToolsFooterButtons,
-  PacioExamRoomFooterButtons
+  PacioExamRoomFooterButtons,
+  PatientDirectoryFooterButtons,
+  OrderHistoryFooterButtons
 };
 
 // Default export (for WorkflowRegistry.registerWorkflow())

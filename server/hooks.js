@@ -227,6 +227,49 @@ export function initRadiologyHooks() {
     });
 
     console.log('[radiology-workflow] ImagingStudy.after.update hook registered');
+
+    // -------------------------------------------------------------------------
+    // HOOK 3c: ImagingStudy.after.remove
+    // Trigger: ImagingStudy deleted
+    // Action: Unlink GridFS DICOM files that referenced this study
+    // -------------------------------------------------------------------------
+
+    ImagingStudies.after.remove(async function(userId, doc) {
+      Meteor.defer(async () => {
+        try {
+          const studyId = doc._id;
+          console.log('[radiology] ImagingStudy removed, unlinking DICOM files:', {
+            _id: studyId,
+            status: doc.status,
+            patient: get(doc, 'subject.reference')
+          });
+
+          const GridFSManager = global.GridFSManager;
+          if (!GridFSManager || !GridFSManager.isInitialized()) {
+            console.warn('[radiology] GridFSManager not available, cannot unlink files');
+            return;
+          }
+
+          const bucket = GridFSManager.getBucket();
+          const db = bucket.s.db;
+          const filesCollection = db.collection('dicom.files');
+
+          const result = await filesCollection.updateMany(
+            { 'metadata.imagingStudyId': studyId },
+            { $unset: { 'metadata.imagingStudyId': '' } }
+          );
+
+          console.log('[radiology] Unlinked DICOM files from removed ImagingStudy:', {
+            imagingStudyId: studyId,
+            filesUnlinked: result.modifiedCount
+          });
+        } catch (error) {
+          console.error('[radiology] Error in ImagingStudy.after.remove hook:', error);
+        }
+      });
+    });
+
+    console.log('[radiology-workflow] ImagingStudy.after.remove hook registered');
   }
 
   // ---------------------------------------------------------------------------

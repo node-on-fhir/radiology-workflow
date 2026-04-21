@@ -456,6 +456,36 @@ Meteor.methods({
     return cancelData.serviceRequestId;
   },
 
+  /**
+   * Hard delete a service request (permanently remove from database)
+   * @param {Object} deleteData - { serviceRequestId }
+   * @returns {String} ServiceRequest ID
+   */
+  'radiology.hardDeleteServiceRequest': async function(deleteData) {
+    check(deleteData, { serviceRequestId: String });
+
+    if (!this.userId) {
+      throw new Meteor.Error('not-authorized', 'You must be logged in');
+    }
+
+    console.log('[radiology.hardDeleteServiceRequest] Deleting:', deleteData.serviceRequestId);
+
+    const ServiceRequests = Meteor.Collections?.ServiceRequests || global.Collections?.ServiceRequests;
+    if (!ServiceRequests) {
+      throw new Meteor.Error('collection-not-found', 'ServiceRequests collection not available');
+    }
+
+    const existing = await ServiceRequests.findOneAsync({ _id: deleteData.serviceRequestId });
+    if (!existing) {
+      throw new Meteor.Error('not-found', 'ServiceRequest not found');
+    }
+
+    await ServiceRequests.removeAsync({ _id: deleteData.serviceRequestId });
+
+    console.log('[radiology.hardDeleteServiceRequest] Deleted:', deleteData.serviceRequestId);
+    return deleteData.serviceRequestId;
+  },
+
   // ---------------------------------------------------------------------------
   // READING (Radiologist)
   // ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 // npmPackages/radiology-workflow/client/TechDashboard.jsx
 
 import React, { useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTracker } from 'meteor/react-meteor-data';
 import { Meteor } from 'meteor/meteor';
 import { Session } from 'meteor/session';
@@ -31,7 +31,9 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  Stack
+  Stack,
+  Card,
+  CardContent
 } from '@mui/material';
 import MedicalServicesIcon from '@mui/icons-material/MedicalServices';
 import DensitySmallIcon from '@mui/icons-material/DensitySmall';
@@ -45,6 +47,10 @@ import ImageIcon from '@mui/icons-material/Image';
 import MonitorHeartIcon from '@mui/icons-material/MonitorHeart';
 import PersonIcon from '@mui/icons-material/Person';
 import CancelIcon from '@mui/icons-material/Cancel';
+import DeleteIcon from '@mui/icons-material/Delete';
+import BlockIcon from '@mui/icons-material/Block';
+import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
+import AttachFileIcon from '@mui/icons-material/AttachFile';
 
 import WorklistTable from './components/WorklistTable.jsx';
 import TatDisplay from './components/TatDisplay.jsx';
@@ -73,12 +79,12 @@ const SAFETY_QUESTIONS = [
   { id: 'diabetes', text: 'Diabetes with metformin use?', type: 'boolean' }
 ];
 
-// Tab definitions
+// Tab definitions (key is used for ?tab= URL param)
 const TECH_TABS = [
-  { label: 'Active Orders', filter: function(o) { return o.status === 'active'; } },
-  { label: 'In Progress', filter: function(o) { return o.status === 'active' && o._hasInProgressProcedure; } },
-  { label: 'On Hold', filter: function(o) { return o.status === 'on-hold'; } },
-  { label: 'All', filter: function() { return true; } }
+  { key: 'active', label: 'Active Orders', filter: function(o) { return o.status === 'active'; } },
+  { key: 'in-progress', label: 'In Progress', filter: function(o) { return o.status === 'active' && o._hasInProgressProcedure; } },
+  { key: 'on-hold', label: 'On Hold', filter: function(o) { return o.status === 'on-hold'; } },
+  { key: 'all', label: 'All', filter: function() { return true; } }
 ];
 
 // Map display-text prefixes → DICOM modality codes
@@ -134,6 +140,7 @@ function getStatusChipColor(status) {
 
 function TechDashboard() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const selectedPatient = useTracker(function() {
     return Session.get('selectedPatient');
@@ -150,11 +157,22 @@ function TechDashboard() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [currentProcedure, setCurrentProcedure] = useState(null);
-  const [activeTab, setActiveTab] = useState(0);
+  const activeTab = useMemo(function() {
+    var tabParam = searchParams.get('tab');
+    if (tabParam) {
+      var index = TECH_TABS.findIndex(function(t) { return t.key === tabParam; });
+      if (index !== -1) return index;
+    }
+    return 0;
+  }, [searchParams]);
   const [density, setDensity] = useState('standard');
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [launchModalOpen, setLaunchModalOpen] = useState(false);
   const [launchPatient, setLaunchPatient] = useState(null);
+  const [completingOrderId, setCompletingOrderId] = useState(null);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deletingOrderId, setDeletingOrderId] = useState(null);
 
   // ---------------------------------------------------------------------------
   // Data subscriptions
@@ -162,6 +180,7 @@ function TechDashboard() {
   const {
     orders,
     procedures,
+    imagingStudies,
     isLoading
   } = useTracker(function() {
     const ordersHandle = Meteor.subscribe('radiology.ServiceRequests', {
@@ -172,11 +191,15 @@ function TechDashboard() {
       status: 'in-progress'
     }, { limit: 50 });
 
+    Meteor.subscribe('radiology.ImagingStudies', {}, { limit: 200 });
+
     const ServiceRequests = Meteor.Collections?.ServiceRequests;
     const Procedures = Meteor.Collections?.Procedures;
+    const ImagingStudies = Meteor.Collections?.ImagingStudies;
 
     let activeOrders = [];
     let activeProcedures = [];
+    let activeImagingStudies = [];
 
     if (ServiceRequests) {
       activeOrders = ServiceRequests.find({
@@ -199,9 +222,14 @@ function TechDashboard() {
       }).fetch();
     }
 
+    if (ImagingStudies) {
+      activeImagingStudies = ImagingStudies.find({}).fetch();
+    }
+
     return {
       orders: activeOrders,
       procedures: activeProcedures,
+      imagingStudies: activeImagingStudies,
       isLoading: !ordersHandle.ready()
     };
   }, []);
@@ -210,11 +238,24 @@ function TechDashboard() {
   // Flatten orders + annotate with procedure status
   // ---------------------------------------------------------------------------
   const flattenedOrders = useMemo(function() {
-    const procedureOrderIds = new Set();
+    var procedureByOrderId = new Map();
     procedures.forEach(function(proc) {
-      const basedOn = get(proc, 'basedOn.0.reference', '');
-      const orderId = basedOn.replace('ServiceRequest/', '');
-      if (orderId) procedureOrderIds.add(orderId);
+      var basedOn = get(proc, 'basedOn.0.reference', '');
+      var orderId = basedOn.replace('ServiceRequest/', '');
+      if (orderId) procedureByOrderId.set(orderId, proc._id);
+    });
+
+    var imagingStudyByOrderId = new Map();
+    imagingStudies.forEach(function(study) {
+      var basedOnRef = get(study, 'basedOn.0.reference', '');
+      var orderId = basedOnRef.replace('ServiceRequest/', '');
+      if (orderId) {
+        var hasSeries = Array.isArray(study.series) && study.series.length > 0;
+        var existing = imagingStudyByOrderId.get(orderId);
+        if (!existing || hasSeries) {
+          imagingStudyByOrderId.set(orderId, { hasSeries: hasSeries });
+        }
+      }
     });
 
     return orders.map(function(order) {
@@ -230,11 +271,13 @@ function TechDashboard() {
         authoredOn: get(order, 'authoredOn', ''),
         barcode: get(order, '_id', ''),
         reasonCode: get(order, 'reasonCode.0.text', get(order, 'reasonCode.0.coding.0.display', '')),
-        _hasInProgressProcedure: procedureOrderIds.has(order._id),
+        _hasInProgressProcedure: procedureByOrderId.has(order._id),
+        _procedureId: procedureByOrderId.get(order._id) || null,
+        _imagingStudyInfo: imagingStudyByOrderId.get(order._id) || null,
         _raw: order
       };
     });
-  }, [orders, procedures]);
+  }, [orders, procedures, imagingStudies]);
 
   // ---------------------------------------------------------------------------
   // Tab-filtered data
@@ -324,6 +367,32 @@ function TechDashboard() {
             color={getStatusChipColor(val)}
             variant="outlined"
           />
+        );
+      }
+    },
+    {
+      key: '_imagingStudyInfo',
+      label: 'Img',
+      width: 60,
+      render: function(val) {
+        if (!val) {
+          return (
+            <Tooltip title="No imaging study">
+              <ImageIcon sx={{ fontSize: '1.2rem', color: 'text.disabled' }} />
+            </Tooltip>
+          );
+        }
+        if (!val.hasSeries) {
+          return (
+            <Tooltip title="Study created, no images attached">
+              <ImageIcon sx={{ fontSize: '1.2rem', color: 'warning.main' }} />
+            </Tooltip>
+          );
+        }
+        return (
+          <Tooltip title="Images attached">
+            <AttachFileIcon sx={{ fontSize: '1.2rem', color: 'success.main' }} />
+          </Tooltip>
         );
       }
     },
@@ -596,8 +665,116 @@ function TechDashboard() {
   }
 
   function handleRefresh() {
-    // Force resubscription by triggering a reactive change
-    setActiveTab(function(prev) { return prev; });
+    // Re-apply current tab param to force a reactive change
+    var tabKey = TECH_TABS[activeTab] ? TECH_TABS[activeTab].key : 'active';
+    setSearchParams({ tab: tabKey }, { replace: true });
+  }
+
+  async function handleQuickComplete(row) {
+    if (!row._procedureId) return;
+
+    setCompletingOrderId(row._id);
+    setError(null);
+
+    try {
+      var rawOrder = row._raw;
+      var patientId = get(rawOrder, 'subject.reference', '').replace('Patient/', '');
+      var encounterId = get(rawOrder, 'encounter.reference', '').replace('Encounter/', '');
+      var modality = getDicomModality(rawOrder, 'Unknown');
+
+      await Meteor.callAsync('radiology.completeProcedure', {
+        procedureId: row._procedureId,
+        serviceRequestId: row._id,
+        patientId: patientId,
+        encounterId: encounterId || undefined,
+        modality: modality,
+        description: modality + ' imaging study',
+        numberOfSeries: 1,
+        numberOfInstances: 1
+      });
+
+      console.log('[TechDashboard] Quick-completed procedure:', row._procedureId);
+    } catch (err) {
+      console.error('[TechDashboard] Error quick-completing procedure:', err);
+      setError(err.reason || err.message || 'Failed to complete procedure');
+    } finally {
+      setCompletingOrderId(null);
+    }
+  }
+
+  async function handleQuickCompleteAlways(row) {
+    var rawOrder = row._raw;
+    var patientId = get(rawOrder, 'subject.reference', '').replace('Patient/', '');
+    var encounterId = get(rawOrder, 'encounter.reference', '').replace('Encounter/', '');
+    var modality = getDicomModality(rawOrder, 'Unknown');
+
+    setCompletingOrderId(row._id);
+    setError(null);
+
+    try {
+      if (row._hasInProgressProcedure && row._procedureId) {
+        await Meteor.callAsync('radiology.completeProcedure', {
+          procedureId: row._procedureId,
+          serviceRequestId: row._id,
+          patientId: patientId,
+          encounterId: encounterId || undefined,
+          modality: modality,
+          description: modality + ' imaging study',
+          numberOfSeries: 1,
+          numberOfInstances: 1
+        });
+      } else {
+        var procedureResult = await Meteor.callAsync('radiology.startProcedure', {
+          serviceRequestId: row._id,
+          patientId: patientId,
+          encounterId: encounterId || undefined,
+          modality: modality
+        });
+        await Meteor.callAsync('radiology.completeProcedure', {
+          procedureId: procedureResult,
+          serviceRequestId: row._id,
+          patientId: patientId,
+          encounterId: encounterId || undefined,
+          modality: modality,
+          description: modality + ' imaging study',
+          numberOfSeries: 1,
+          numberOfInstances: 1
+        });
+      }
+      console.log('[TechDashboard] Quick-completed (always):', row._id);
+    } catch (err) {
+      console.error('[TechDashboard] Error quick-completing:', err);
+      setError(err.reason || err.message || 'Failed to complete');
+    } finally {
+      setCompletingOrderId(null);
+    }
+  }
+
+  async function handleDeleteOrder(mode) {
+    if (!deleteTarget) return;
+    setDeletingOrderId(deleteTarget._id);
+    setError(null);
+
+    try {
+      if (mode === 'revoke') {
+        await Meteor.callAsync('radiology.cancelServiceRequest', {
+          serviceRequestId: deleteTarget._id
+        });
+        console.log('[TechDashboard] Revoked order:', deleteTarget._id);
+      } else {
+        await Meteor.callAsync('radiology.hardDeleteServiceRequest', {
+          serviceRequestId: deleteTarget._id
+        });
+        console.log('[TechDashboard] Hard-deleted order:', deleteTarget._id);
+      }
+      setShowDeleteDialog(false);
+      setDeleteTarget(null);
+    } catch (err) {
+      console.error('[TechDashboard] Error deleting order:', err);
+      setError(err.reason || err.message || 'Failed to delete');
+    } finally {
+      setDeletingOrderId(null);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -671,6 +848,25 @@ function TechDashboard() {
         >
           Start Workflow
         </Button>
+
+        <Button variant="contained" size="small" color="success"
+          startIcon={completingOrderId === row._id ? <CircularProgress size={16} /> : <CheckCircleIcon />}
+          disabled={completingOrderId === row._id}
+          onClick={function(e) { e.stopPropagation(); handleQuickCompleteAlways(row); }}
+        >
+          Complete
+        </Button>
+
+        <Button variant="contained" size="small" color="error"
+          startIcon={<DeleteIcon />}
+          onClick={function(e) {
+            e.stopPropagation();
+            setDeleteTarget(row);
+            setShowDeleteDialog(true);
+          }}
+        >
+          Delete
+        </Button>
       </Stack>
     );
   }
@@ -725,7 +921,10 @@ function TechDashboard() {
       {/* Tabs */}
       <Tabs
         value={activeTab}
-        onChange={function(e, v) { setActiveTab(v); }}
+        onChange={function(e, v) {
+          var tabKey = TECH_TABS[v] ? TECH_TABS[v].key : 'active';
+          setSearchParams({ tab: tabKey }, { replace: true });
+        }}
         sx={{
           minHeight: density === 'compact' ? 36 : 48,
           borderBottom: 1,
@@ -999,6 +1198,74 @@ function TechDashboard() {
             startIcon={submitting ? <CircularProgress size={18} /> : <CancelIcon />}
           >
             Yes, Cancel Order
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={showDeleteDialog}
+        onClose={function() { setShowDeleteDialog(false); setDeleteTarget(null); }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Delete Service Request</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            Choose how to remove this imaging order:
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+            <Card
+              onClick={function() { handleDeleteOrder('revoke'); }}
+              sx={{
+                flex: 1, cursor: 'pointer',
+                border: '1px solid', borderColor: 'divider',
+                transition: 'all 0.15s ease-in-out',
+                '&:hover': { borderColor: '#ed6c02', backgroundColor: 'rgba(237,108,2,0.04)' }
+              }}
+            >
+              <CardContent sx={{ textAlign: 'center', py: 3 }}>
+                <Box sx={{ mb: 1, color: 'rgba(255,255,255,0.5)' }}>
+                  <BlockIcon sx={{ fontSize: 40 }} />
+                </Box>
+                <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
+                  Revoke
+                </Typography>
+                <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
+                  Sets status to "revoked". Record stays in the database for audit trail.
+                </Typography>
+              </CardContent>
+            </Card>
+            <Card
+              onClick={function() { handleDeleteOrder('hard'); }}
+              sx={{
+                flex: 1, cursor: 'pointer',
+                border: '1px solid', borderColor: 'divider',
+                transition: 'all 0.15s ease-in-out',
+                '&:hover': { borderColor: '#d32f2f', backgroundColor: 'rgba(211,47,47,0.04)' }
+              }}
+            >
+              <CardContent sx={{ textAlign: 'center', py: 3 }}>
+                <Box sx={{ mb: 1, color: 'rgba(255,255,255,0.5)' }}>
+                  <DeleteForeverIcon sx={{ fontSize: 40 }} />
+                </Box>
+                <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
+                  Hard Delete
+                </Typography>
+                <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
+                  Permanently removes the record from the database. Cannot be undone.
+                </Typography>
+              </CardContent>
+            </Card>
+          </Box>
+          {deletingOrderId && (
+            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 1 }}>
+              <CircularProgress size={24} />
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={function() { setShowDeleteDialog(false); setDeleteTarget(null); }}>
+            Cancel
           </Button>
         </DialogActions>
       </Dialog>
