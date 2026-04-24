@@ -51,6 +51,8 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import BlockIcon from '@mui/icons-material/Block';
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
+import BadgeIcon from '@mui/icons-material/Badge';
+import AccessibilityIcon from '@mui/icons-material/Accessibility';
 
 import WorklistTable from './components/WorklistTable.jsx';
 import TatDisplay from './components/TatDisplay.jsx';
@@ -166,6 +168,12 @@ function TechDashboard() {
     return 0;
   }, [searchParams]);
   const [density, setDensity] = useState('standard');
+  const [columnVisibility, setColumnVisibility] = useState({
+    patientDisplay: true,
+    patientId: false,
+    imagingStudyId: false,
+    bodySite: true
+  });
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [launchModalOpen, setLaunchModalOpen] = useState(false);
   const [launchPatient, setLaunchPatient] = useState(null);
@@ -253,7 +261,10 @@ function TechDashboard() {
         var hasSeries = Array.isArray(study.series) && study.series.length > 0;
         var existing = imagingStudyByOrderId.get(orderId);
         if (!existing || hasSeries) {
-          imagingStudyByOrderId.set(orderId, { hasSeries: hasSeries });
+          imagingStudyByOrderId.set(orderId, {
+            id: get(study, 'id', get(study, '_id', '')),
+            hasSeries: hasSeries
+          });
         }
       }
     });
@@ -268,6 +279,8 @@ function TechDashboard() {
         modality: getDicomModality(order),
         bodySite: get(order, 'bodySite.0.text', get(order, 'bodySite.0.coding.0.display', '')),
         patientDisplay: get(order, 'subject.display', get(order, 'subject.reference', '').replace('Patient/', '')),
+        patientId: get(order, 'subject.reference', '').replace('Patient/', ''),
+        imagingStudyId: get(imagingStudyByOrderId.get(order._id), 'id', ''),
         authoredOn: get(order, 'authoredOn', ''),
         barcode: get(order, '_id', ''),
         reasonCode: get(order, 'reasonCode.0.text', get(order, 'reasonCode.0.coding.0.display', '')),
@@ -448,6 +461,34 @@ function TechDashboard() {
       }
     },
     {
+      key: 'patientId',
+      label: 'Patient ID',
+      width: 120,
+      filterable: true,
+      filterType: 'text',
+      render: function(val) {
+        return (
+          <Typography variant="caption" sx={{ fontFamily: 'monospace', fontSize: '0.7rem' }}>
+            {val ? val.substring(0, 12) : '-'}
+          </Typography>
+        );
+      }
+    },
+    {
+      key: 'imagingStudyId',
+      label: 'Study ID',
+      width: 120,
+      filterable: true,
+      filterType: 'text',
+      render: function(val) {
+        return (
+          <Typography variant="caption" sx={{ fontFamily: 'monospace', fontSize: '0.7rem' }}>
+            {val ? val.substring(0, 12) : '-'}
+          </Typography>
+        );
+      }
+    },
+    {
       key: 'authoredOn',
       label: 'Order Date',
       width: 140,
@@ -475,6 +516,24 @@ function TechDashboard() {
       }
     }
   ];
+
+  // ---------------------------------------------------------------------------
+  // Column visibility filtering
+  // ---------------------------------------------------------------------------
+  const visibleColumns = useMemo(function() {
+    return techColumns.filter(function(col) {
+      if (col.key in columnVisibility) {
+        return columnVisibility[col.key];
+      }
+      return true;
+    });
+  }, [columnVisibility]);
+
+  function toggleColumn(key) {
+    setColumnVisibility(function(prev) {
+      return Object.assign({}, prev, { [key]: !prev[key] });
+    });
+  }
 
   // ---------------------------------------------------------------------------
   // Event handlers
@@ -872,6 +931,17 @@ function TechDashboard() {
   }
 
   // ---------------------------------------------------------------------------
+  // Compute ImagingStudy ID for selected order (used in drawer subtitle)
+  // ---------------------------------------------------------------------------
+  var selectedStudyId = useMemo(function() {
+    if (!selectedOrder) return null;
+    var study = imagingStudies.find(function(s) {
+      return get(s, 'basedOn.0.reference', '').includes(get(selectedOrder, '_id', ''));
+    });
+    return get(study, 'id', get(study, '_id', null));
+  }, [selectedOrder, imagingStudies]);
+
+  // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
   return (
@@ -918,31 +988,56 @@ function TechDashboard() {
         </Alert>
       )}
 
-      {/* Tabs */}
-      <Tabs
-        value={activeTab}
-        onChange={function(e, v) {
-          var tabKey = TECH_TABS[v] ? TECH_TABS[v].key : 'active';
-          setSearchParams({ tab: tabKey }, { replace: true });
-        }}
-        sx={{
-          minHeight: density === 'compact' ? 36 : 48,
-          borderBottom: 1,
-          borderColor: 'divider',
-          px: 2,
-          flexShrink: 0,
-          '& .MuiTab-root': {
+      {/* Tabs + Column Toggles */}
+      <Box sx={{ display: 'flex', alignItems: 'center', borderBottom: 1, borderColor: 'divider', px: 2, flexShrink: 0 }}>
+        <Tabs
+          value={activeTab}
+          onChange={function(e, v) {
+            var tabKey = TECH_TABS[v] ? TECH_TABS[v].key : 'active';
+            setSearchParams({ tab: tabKey }, { replace: true });
+          }}
+          sx={{
+            flex: 1,
             minHeight: density === 'compact' ? 36 : 48,
-            py: density === 'compact' ? 0 : 1,
-            textTransform: 'none',
-            fontSize: density === 'compact' ? '0.8rem' : '0.875rem'
-          }
-        }}
-      >
-        {TECH_TABS.map(function(tab, i) {
-          return <Tab key={i} label={tab.label} />;
-        })}
-      </Tabs>
+            '& .MuiTab-root': {
+              minHeight: density === 'compact' ? 36 : 48,
+              py: density === 'compact' ? 0 : 1,
+              textTransform: 'none',
+              fontSize: density === 'compact' ? '0.8rem' : '0.875rem'
+            }
+          }}
+        >
+          {TECH_TABS.map(function(tab, i) {
+            return <Tab key={i} label={tab.label} />;
+          })}
+        </Tabs>
+        <Box sx={{ display: 'flex', gap: 0.5, ml: 'auto' }}>
+          <Tooltip title="Patient Name">
+            <IconButton size="small" onClick={function() { toggleColumn('patientDisplay'); }}
+              color={columnVisibility.patientDisplay ? 'primary' : 'default'}>
+              <PersonIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Patient ID">
+            <IconButton size="small" onClick={function() { toggleColumn('patientId'); }}
+              color={columnVisibility.patientId ? 'primary' : 'default'}>
+              <BadgeIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="ImagingStudy ID">
+            <IconButton size="small" onClick={function() { toggleColumn('imagingStudyId'); }}
+              color={columnVisibility.imagingStudyId ? 'primary' : 'default'}>
+              <ImageIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Body Part">
+            <IconButton size="small" onClick={function() { toggleColumn('bodySite'); }}
+              color={columnVisibility.bodySite ? 'primary' : 'default'}>
+              <AccessibilityIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </Box>
+      </Box>
 
       {/* Worklist table */}
       <Box
@@ -955,7 +1050,7 @@ function TechDashboard() {
         }}
       >
         <WorklistTable
-          columns={techColumns}
+          columns={visibleColumns}
           data={tabFilteredData}
           isLoading={isLoading}
           emptyMessage="No imaging orders found"
@@ -975,7 +1070,7 @@ function TechDashboard() {
         open={!!selectedOrder}
         onClose={function() { setSelectedOrder(null); }}
         title={get(selectedOrder, 'code.text', 'Imaging Order')}
-        subtitle={'Patient: ' + get(selectedOrder, 'subject.display', 'Unknown')}
+        subtitle={selectedStudyId ? 'Study: ' + selectedStudyId : 'Patient: ' + get(selectedOrder, 'subject.display', 'Unknown')}
       >
         {selectedOrder && (
           <Box>

@@ -14,7 +14,8 @@
   "peerDependencies": {
     "react": "^18.0.0",
     "@mui/material": "^5.0.0",
-    "@mui/icons-material": "^5.0.0"
+    "@mui/icons-material": "^5.0.0",
+    "@node-on-fhir/fhircast-module": "^0.1.0"
   },
   "keywords": [
     "fhir",

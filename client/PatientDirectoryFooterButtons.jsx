@@ -8,6 +8,8 @@ import Button from '@mui/material/Button';
 
 import AssignmentIcon from '@mui/icons-material/Assignment';
 
+import { SubscribeButton } from '@node-on-fhir/fhircast-module';
+
 const footerRoutes = [
   { label: 'Order Catalog', path: '/radiology/order-entry', icon: AssignmentIcon }
 ];
@@ -47,6 +49,7 @@ function PatientDirectoryFooterButtons() {
           </Button>
         );
       })}
+      <SubscribeButton />
     </Box>
   );
 }
