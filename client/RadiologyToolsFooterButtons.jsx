@@ -10,11 +10,18 @@ import ChecklistIcon from '@mui/icons-material/Checklist';
 import MonitorHeartIcon from '@mui/icons-material/MonitorHeart';
 import QuizIcon from '@mui/icons-material/Quiz';
 
-const footerRoutes = [
-  { label: 'Checklists', path: '/checklist-manifesto', icon: ChecklistIcon },
-  { label: 'Vital Signs', path: '/take-vital-signs', icon: MonitorHeartIcon },
-  { label: 'Questionnaires', path: '/structured-data-capture', icon: QuizIcon }
+const allFooterRoutes = [
+  { label: 'Checklists', path: '/checklist-manifesto', icon: ChecklistIcon, requirePackage: 'clinical:checklist-manifesto' },
+  { label: 'Vital Signs', path: '/take-vital-signs', icon: MonitorHeartIcon, requirePackage: 'clinical:vital-signs' },
+  { label: 'Questionnaires', path: '/structured-data-capture', icon: QuizIcon, requirePackage: 'clinical:structured-data-capture' }
 ];
+
+const footerRoutes = allFooterRoutes.filter(function(route) {
+  if (route.requirePackage) {
+    return typeof Package !== 'undefined' && !!Package[route.requirePackage];
+  }
+  return true;
+});
 
 function RadiologyToolsFooterButtons() {
   const navigate = useNavigate();

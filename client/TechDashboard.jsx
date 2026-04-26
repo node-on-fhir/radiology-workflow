@@ -1,11 +1,13 @@
 // npmPackages/radiology-workflow/client/TechDashboard.jsx
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTracker } from 'meteor/react-meteor-data';
 import { Meteor } from 'meteor/meteor';
 import { Session } from 'meteor/session';
 import { get } from 'lodash';
+import dicomParser from 'dicom-parser';
+import { extractAllDicomMetadata } from '/imports/ui/DICOM/utils/DicomFhirMapping';
 import {
   Container,
   Box,
@@ -33,7 +35,8 @@ import {
   DialogActions,
   Stack,
   Card,
-  CardContent
+  CardContent,
+  LinearProgress
 } from '@mui/material';
 import MedicalServicesIcon from '@mui/icons-material/MedicalServices';
 import DensitySmallIcon from '@mui/icons-material/DensitySmall';
@@ -53,11 +56,14 @@ import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import BadgeIcon from '@mui/icons-material/Badge';
 import AccessibilityIcon from '@mui/icons-material/Accessibility';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import InfoIcon from '@mui/icons-material/Info';
 
 import WorklistTable from './components/WorklistTable.jsx';
 import TatDisplay from './components/TatDisplay.jsx';
 import StatCounters from './components/StatCounters.jsx';
 import WorkflowDrawer from './components/WorkflowDrawer.jsx';
+import RowActionIcons from './components/RowActionIcons.jsx';
 import { LaunchAppsModal } from '/imports/components/LaunchAppsModal.jsx';
 
 // =============================================================================
@@ -84,10 +90,32 @@ const SAFETY_QUESTIONS = [
 // Tab definitions (key is used for ?tab= URL param)
 const TECH_TABS = [
   { key: 'active', label: 'Active Orders', filter: function(o) { return o.status === 'active'; } },
-  { key: 'in-progress', label: 'In Progress', filter: function(o) { return o.status === 'active' && o._hasInProgressProcedure; } },
+  { key: 'in-progress', label: 'In Progress', filter: function(o) { return o.status === 'screening-complete' || o.status === 'in-progress'; } },
   { key: 'on-hold', label: 'On Hold', filter: function(o) { return o.status === 'on-hold'; } },
   { key: 'all', label: 'All', filter: function() { return true; } }
 ];
+
+// Column visibility ↔ URL param mapping
+var COLUMN_PARAM_MAP = {
+  'patient-name': 'patientDisplay',
+  'patient-reference': 'patientId',
+  'imaging-study-id': 'imagingStudyId',
+  'body-site': 'bodySite'
+};
+
+var COLUMN_KEY_TO_PARAM = {
+  'patientDisplay': 'patient-name',
+  'patientId': 'patient-reference',
+  'imagingStudyId': 'imaging-study-id',
+  'bodySite': 'body-site'
+};
+
+var COLUMN_DEFAULTS = {
+  patientDisplay: true,
+  patientId: false,
+  imagingStudyId: false,
+  bodySite: true
+};
 
 // Map display-text prefixes → DICOM modality codes
 // Handles cases like MRA→MR and DEXA→DXA
@@ -131,6 +159,8 @@ function getPriorityChipProps(priority) {
 function getStatusChipColor(status) {
   const map = {
     'active': 'info',
+    'screening-complete': 'info',
+    'in-progress': 'primary',
     'completed': 'success',
     'on-hold': 'warning',
     'revoked': 'default',
@@ -168,12 +198,16 @@ function TechDashboard() {
     return 0;
   }, [searchParams]);
   const [density, setDensity] = useState('standard');
-  const [columnVisibility, setColumnVisibility] = useState({
-    patientDisplay: true,
-    patientId: false,
-    imagingStudyId: false,
-    bodySite: true
-  });
+  const columnVisibility = useMemo(function() {
+    var vis = Object.assign({}, COLUMN_DEFAULTS);
+    Object.keys(COLUMN_PARAM_MAP).forEach(function(param) {
+      var val = searchParams.get(param);
+      if (val !== null) {
+        vis[COLUMN_PARAM_MAP[param]] = val === 'true';
+      }
+    });
+    return vis;
+  }, [searchParams]);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [launchModalOpen, setLaunchModalOpen] = useState(false);
   const [launchPatient, setLaunchPatient] = useState(null);
@@ -181,6 +215,10 @@ function TechDashboard() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deletingOrderId, setDeletingOrderId] = useState(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [uploadState, setUploadState] = useState({
+    uploading: false, progress: 0, total: 0, completed: 0, errors: []
+  });
 
   // ---------------------------------------------------------------------------
   // Data subscriptions
@@ -243,6 +281,16 @@ function TechDashboard() {
   }, []);
 
   // ---------------------------------------------------------------------------
+  // Parse panel param — auto-advance workflow step
+  // ---------------------------------------------------------------------------
+  useEffect(function() {
+    var panelParam = searchParams.get('panel');
+    if (panelParam === 'image-acquisition' && selectedOrder) {
+      setWorkflowStep(1);
+    }
+  }, [searchParams, selectedOrder]);
+
+  // ---------------------------------------------------------------------------
   // Flatten orders + annotate with procedure status
   // ---------------------------------------------------------------------------
   const flattenedOrders = useMemo(function() {
@@ -262,14 +310,32 @@ function TechDashboard() {
         var existing = imagingStudyByOrderId.get(orderId);
         if (!existing || hasSeries) {
           imagingStudyByOrderId.set(orderId, {
-            id: get(study, 'id', get(study, '_id', '')),
+            id: study._id,
             hasSeries: hasSeries
           });
         }
       }
     });
 
+    var Patients = Meteor.Collections?.Patients;
+
     return orders.map(function(order) {
+      var orderPatientId = get(order, 'subject.reference', '').replace('Patient/', '');
+      var patientName = get(order, 'subject.display', '');
+
+      // Look up patient name from Patients collection if not in subject.display
+      if (!patientName && orderPatientId && Patients) {
+        var patientRecord = Patients.findOne({ _id: orderPatientId });
+        if (!patientRecord) {
+          patientRecord = Patients.findOne({ id: orderPatientId });
+        }
+        if (patientRecord) {
+          patientName = get(patientRecord, 'name.0.text',
+            (get(patientRecord, 'name.0.given.0', '') + ' ' + get(patientRecord, 'name.0.family', '')).trim()
+          );
+        }
+      }
+
       return {
         _id: get(order, '_id', ''),
         id: get(order, 'id', ''),
@@ -278,8 +344,8 @@ function TechDashboard() {
         description: get(order, 'code.text', get(order, 'code.coding.0.display', '')),
         modality: getDicomModality(order),
         bodySite: get(order, 'bodySite.0.text', get(order, 'bodySite.0.coding.0.display', '')),
-        patientDisplay: get(order, 'subject.display', get(order, 'subject.reference', '').replace('Patient/', '')),
-        patientId: get(order, 'subject.reference', '').replace('Patient/', ''),
+        patientDisplay: patientName || orderPatientId,
+        patientId: orderPatientId,
         imagingStudyId: get(imagingStudyByOrderId.get(order._id), 'id', ''),
         authoredOn: get(order, 'authoredOn', ''),
         barcode: get(order, '_id', ''),
@@ -332,6 +398,54 @@ function TechDashboard() {
   // ---------------------------------------------------------------------------
   const techColumns = [
     {
+      key: 'actions',
+      label: '',
+      width: 130,
+      render: function(val, row) {
+        return (
+          <RowActionIcons
+            row={row}
+            actions={[
+              {
+                icon: <VisibilityIcon fontSize="small" />,
+                tooltip: 'Open Viewer',
+                color: 'primary',
+                onClick: function(r) {
+                  var studyId = get(r, '_imagingStudyInfo.id', '');
+                  if (studyId) {
+                    navigate('/dicom/viewer/' + studyId);
+                  }
+                },
+                disabled: function(r) {
+                  return !r._imagingStudyInfo || !r._imagingStudyInfo.hasSeries;
+                }
+              },
+              {
+                icon: <PlayArrowIcon fontSize="small" />,
+                tooltip: 'Start Workflow',
+                color: 'primary',
+                onClick: function(r) { handleSelectOrder(r._raw); }
+              },
+              {
+                icon: <InfoIcon fontSize="small" />,
+                tooltip: 'View Details',
+                onClick: function(r) { handleSelectOrder(r._raw); }
+              },
+              {
+                icon: <DeleteIcon fontSize="small" />,
+                tooltip: 'Delete Order',
+                color: 'error',
+                onClick: function(r) {
+                  setDeleteTarget(r);
+                  setShowDeleteDialog(true);
+                }
+              }
+            ]}
+          />
+        );
+      }
+    },
+    {
       key: 'tat',
       label: 'TAT',
       width: 120,
@@ -369,6 +483,8 @@ function TechDashboard() {
       filterType: 'select',
       filterOptions: [
         { value: 'active', label: 'Active' },
+        { value: 'screening-complete', label: 'Screening Complete' },
+        { value: 'in-progress', label: 'In Progress' },
         { value: 'on-hold', label: 'On Hold' },
         { value: 'completed', label: 'Completed' }
       ],
@@ -530,9 +646,12 @@ function TechDashboard() {
   }, [columnVisibility]);
 
   function toggleColumn(key) {
-    setColumnVisibility(function(prev) {
-      return Object.assign({}, prev, { [key]: !prev[key] });
-    });
+    var paramName = COLUMN_KEY_TO_PARAM[key];
+    if (paramName) {
+      var newParams = new URLSearchParams(searchParams);
+      newParams.set(paramName, String(!columnVisibility[key]));
+      setSearchParams(newParams, { replace: true });
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -724,9 +843,164 @@ function TechDashboard() {
   }
 
   function handleRefresh() {
-    // Re-apply current tab param to force a reactive change
+    // Re-apply current tab param to force a reactive change, preserving other params
+    var newParams = new URLSearchParams(searchParams);
     var tabKey = TECH_TABS[activeTab] ? TECH_TABS[activeTab].key : 'active';
-    setSearchParams({ tab: tabKey }, { replace: true });
+    newParams.set('tab', tabKey);
+    setSearchParams(newParams, { replace: true });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Drop-zone handlers (DICOM file upload)
+  // ---------------------------------------------------------------------------
+  var handleDragOver = useCallback(function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(true);
+  }, []);
+
+  var handleDragLeave = useCallback(function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+  }, []);
+
+  var handleDrop = useCallback(function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+
+    var droppedFiles = Array.from(e.dataTransfer.files).filter(function(f) {
+      return f.name.toLowerCase().endsWith('.dcm');
+    });
+
+    if (droppedFiles.length > 0) {
+      uploadDicomFiles(droppedFiles);
+    } else {
+      console.warn('[TechDashboard] No .dcm files found in drop');
+    }
+  }, [selectedOrder]);
+
+  function uploadFileToGridFS(file, dicomMetadata) {
+    return new Promise(function(resolve, reject) {
+      var formData = new FormData();
+      formData.append('dicomFile', file);
+
+      if (dicomMetadata) {
+        formData.append('dicomMetadata', JSON.stringify(dicomMetadata));
+      }
+
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/dicom/upload');
+
+      var loginToken = localStorage.getItem('Meteor.loginToken');
+      if (loginToken) {
+        xhr.setRequestHeader('Authorization', 'Bearer ' + loginToken);
+      }
+
+      xhr.onload = function() {
+        if (xhr.status === 200) {
+          try {
+            resolve(JSON.parse(xhr.responseText));
+          } catch (parseErr) {
+            reject(new Error('Invalid response from server'));
+          }
+        } else {
+          reject(new Error('Upload failed with status ' + xhr.status));
+        }
+      };
+
+      xhr.onerror = function() {
+        reject(new Error('Network error during upload'));
+      };
+
+      xhr.send(formData);
+    });
+  }
+
+  async function uploadDicomFiles(files) {
+    setUploadState({ uploading: true, progress: 0, total: files.length, completed: 0, errors: [] });
+
+    var successfulFileIds = [];
+
+    for (var i = 0; i < files.length; i++) {
+      var file = files[i];
+      try {
+        var arrayBuffer = await file.arrayBuffer();
+        var dicomMetadata = null;
+        try {
+          var dataSet = dicomParser.parseDicom(new Uint8Array(arrayBuffer));
+          dicomMetadata = extractAllDicomMetadata(dataSet);
+        } catch (parseErr) {
+          console.warn('[TechDashboard] Could not parse DICOM:', file.name, parseErr);
+        }
+
+        var uploadResult = await uploadFileToGridFS(file, dicomMetadata);
+        console.log('[TechDashboard] Uploaded:', file.name);
+
+        if (uploadResult && uploadResult.fileId) {
+          successfulFileIds.push(uploadResult.fileId);
+        }
+
+        setUploadState(function(prev) {
+          return {
+            uploading: prev.uploading,
+            progress: ((prev.completed + 1) / prev.total) * 100,
+            total: prev.total,
+            completed: prev.completed + 1,
+            errors: prev.errors
+          };
+        });
+      } catch (err) {
+        console.error('[TechDashboard] Upload error:', file.name, err);
+        setUploadState(function(prev) {
+          return {
+            uploading: prev.uploading,
+            progress: ((prev.completed + 1) / prev.total) * 100,
+            total: prev.total,
+            completed: prev.completed + 1,
+            errors: prev.errors.concat(file.name + ': ' + err.message)
+          };
+        });
+      }
+    }
+
+    setUploadState(function(prev) {
+      return {
+        uploading: false,
+        progress: 100,
+        total: prev.total,
+        completed: prev.completed,
+        errors: prev.errors
+      };
+    });
+
+    // Create/update ImagingStudy linked to the ServiceRequest
+    console.log('[TechDashboard] Upload complete, creating ImagingStudy with', successfulFileIds.length, 'files');
+
+    if (successfulFileIds.length > 0) {
+      var studyOptions = {};
+      if (selectedOrder) {
+        var patientId = get(selectedOrder, 'subject.reference', '').replace('Patient/', '');
+        var serviceRequestId = get(selectedOrder, '_id', '');
+        if (patientId) {
+          studyOptions.patientId = patientId;
+        }
+        if (serviceRequestId) {
+          studyOptions.serviceRequestId = serviceRequestId;
+        }
+      }
+
+      Meteor.call('dicom.createOrUpdateImagingStudy', successfulFileIds, studyOptions, function(error, result) {
+        if (error) {
+          console.error('[TechDashboard] Post-upload study creation error:', error);
+        } else {
+          console.log('[TechDashboard] Post-upload study creation:', result);
+        }
+      });
+    } else {
+      console.warn('[TechDashboard] No successful file uploads, skipping ImagingStudy creation');
+    }
   }
 
   async function handleQuickComplete(row) {
@@ -938,7 +1212,7 @@ function TechDashboard() {
     var study = imagingStudies.find(function(s) {
       return get(s, 'basedOn.0.reference', '').includes(get(selectedOrder, '_id', ''));
     });
-    return get(study, 'id', get(study, '_id', null));
+    return study ? study._id : null;
   }, [selectedOrder, imagingStudies]);
 
   // ---------------------------------------------------------------------------
@@ -967,6 +1241,8 @@ function TechDashboard() {
         avatar={<MedicalServicesIcon color="secondary" />}
         title="Tech Worklist"
         titleTypographyProps={{ variant: 'h6', sx: { fontWeight: 600 } }}
+        subheader="Service Requests"
+        subheaderTypographyProps={{ variant: 'body2', color: 'text.secondary' }}
         action={
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <StatCounters counters={statCounters} />
@@ -994,7 +1270,9 @@ function TechDashboard() {
           value={activeTab}
           onChange={function(e, v) {
             var tabKey = TECH_TABS[v] ? TECH_TABS[v].key : 'active';
-            setSearchParams({ tab: tabKey }, { replace: true });
+            var newParams = new URLSearchParams(searchParams);
+            newParams.set('tab', tabKey);
+            setSearchParams(newParams, { replace: true });
           }}
           sx={{
             flex: 1,
@@ -1166,7 +1444,39 @@ function TechDashboard() {
                     </Button>
                   </Box>
                 ) : (
-                  <Box>
+                  <Box
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                    sx={{
+                      borderRadius: 1,
+                      border: isDragOver ? '2px dashed' : '2px dashed transparent',
+                      borderColor: isDragOver ? 'primary.main' : 'transparent',
+                      boxShadow: isDragOver ? '0 0 15px 3px rgba(144,202,249,0.5)' : 'none',
+                      transition: 'border-color 0.2s, box-shadow 0.2s',
+                      p: isDragOver ? 1 : 0
+                    }}
+                  >
+                    {/* Upload progress */}
+                    {uploadState.uploading && (
+                      <Alert severity="info" sx={{ mb: 2 }} icon={<UploadIcon />}>
+                        Uploading {uploadState.completed} of {uploadState.total} files...
+                        <LinearProgress variant="determinate" value={uploadState.progress} sx={{ mt: 1 }} />
+                      </Alert>
+                    )}
+
+                    {/* Upload complete */}
+                    {!uploadState.uploading && uploadState.total > 0 && uploadState.completed === uploadState.total && (
+                      <Alert
+                        severity={uploadState.errors.length > 0 ? 'warning' : 'success'}
+                        sx={{ mb: 2 }}
+                        onClose={function() { setUploadState({ uploading: false, progress: 0, total: 0, completed: 0, errors: [] }); }}
+                      >
+                        Uploaded {uploadState.completed - uploadState.errors.length} of {uploadState.total} files.
+                        {uploadState.errors.length > 0 && ' Errors: ' + uploadState.errors.join('; ')}
+                      </Alert>
+                    )}
+
                     <Alert severity="info" sx={{ mb: 2 }}>
                       Procedure in progress. Acquire images and then complete.
                     </Alert>
@@ -1208,6 +1518,10 @@ function TechDashboard() {
                         Complete Procedure
                       </Button>
                     </Box>
+
+                    <Typography variant="caption" sx={{ color: 'text.disabled', textAlign: 'center', display: 'block', mt: 1 }}>
+                      Drop .dcm files here to upload
+                    </Typography>
                   </Box>
                 )}
               </Box>
@@ -1234,9 +1548,17 @@ function TechDashboard() {
                   <Button
                     variant="contained"
                     fullWidth
+                    disabled={!selectedOrder || !selectedOrder.imagingStudyId}
+                    onClick={function() { navigate('/dicom/viewer/' + selectedOrder.imagingStudyId); }}
+                  >
+                    View Study Images
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    fullWidth
                     onClick={function() { navigate('/dicom/studies'); }}
                   >
-                    View Studies
+                    Browse Studies
                   </Button>
                 </Box>
               </Box>

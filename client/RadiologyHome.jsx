@@ -25,6 +25,8 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import PeopleIcon from '@mui/icons-material/People';
 import ImageIcon from '@mui/icons-material/Image';
 import DescriptionIcon from '@mui/icons-material/Description';
+import StorageIcon from '@mui/icons-material/Storage';
+import FolderIcon from '@mui/icons-material/Folder';
 
 import { useRadiologyRole } from './hooks/useRadiologyRole.js';
 
@@ -162,6 +164,8 @@ function RadiologyHome() {
   const [monthlyHistory, setMonthlyHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [creatingReport, setCreatingReport] = useState(false);
+  const [gridfsStats, setGridfsStats] = useState(null);
+  const [gridfsLoading, setGridfsLoading] = useState(true);
 
   // ---------------------------------------------------------------------------
   // Fetch Statistics
@@ -187,6 +191,17 @@ function RadiologyHome() {
         setMonthlyHistory(result || []);
       }
       setHistoryLoading(false);
+    });
+  }
+
+  function fetchGridFSStats() {
+    Meteor.call('dicom.getGridFSStatus', function(error, result) {
+      if (error) {
+        console.error('[RadiologyHome] Error fetching GridFS stats:', error);
+      } else {
+        setGridfsStats(result);
+      }
+      setGridfsLoading(false);
     });
   }
 
@@ -219,8 +234,12 @@ function RadiologyHome() {
   useEffect(function() {
     fetchStats();
     fetchMonthlyHistory();
+    fetchGridFSStats();
 
-    const interval = setInterval(fetchStats, 30000);
+    const interval = setInterval(function() {
+      fetchStats();
+      fetchGridFSStats();
+    }, 30000);
     return function() {
       clearInterval(interval);
     };
@@ -316,6 +335,41 @@ function RadiologyHome() {
           loading={statsLoading}
         />
       </Grid>
+
+      {/* DICOM Storage (GridFS) */}
+      <Typography variant="h6" gutterBottom sx={{ color: 'text.primary', mb: 2 }}>
+        DICOM Storage
+      </Typography>
+
+      <Grid container spacing={2} sx={{ mb: 3 }}>
+        <StatCard
+          label="dicom.files"
+          value={gridfsStats?.fileCount}
+          icon={<FolderIcon fontSize="large" />}
+          color="info.main"
+          loading={gridfsLoading}
+        />
+        <StatCard
+          label="dicom.chunks"
+          value={gridfsStats?.chunkCount}
+          icon={<StorageIcon fontSize="large" />}
+          color="secondary.main"
+          loading={gridfsLoading}
+        />
+        <StatCard
+          label="Storage (MB)"
+          value={gridfsStats?.totalSizeMB}
+          icon={<StorageIcon fontSize="large" />}
+          color="warning.main"
+          loading={gridfsLoading}
+        />
+      </Grid>
+
+      {gridfsStats && !gridfsStats.initialized && (
+        <Alert severity="warning" sx={{ mb: 3 }}>
+          GridFS is not initialized. {gridfsStats.message || 'DICOM file storage is unavailable.'}
+        </Alert>
+      )}
 
       {/* Status Breakdown Cards */}
       <Grid container spacing={3} sx={{ mb: 3 }}>

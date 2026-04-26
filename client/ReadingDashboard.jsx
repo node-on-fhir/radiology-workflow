@@ -322,7 +322,7 @@ function ReadingDashboard() {
                 icon: <VisibilityIcon fontSize="small" />,
                 tooltip: 'Open Viewer',
                 color: 'primary',
-                onClick: function(r) { navigate('/dicom/viewer/' + r._id); },
+                onClick: function(r) { navigate('/dicom/viewer/' + r._id + '?previous=/radiology/reading'); },
                 disabled: function(r) { return !hasLinkedGridfsFiles(r._raw); }
               },
               {
@@ -758,6 +758,8 @@ function ReadingDashboard() {
         avatar={<ImageIcon color="error" />}
         title="Reading Worklist"
         titleTypographyProps={{ variant: 'h6', sx: { fontWeight: 600 } }}
+        subheader="Imaging Studies"
+        subheaderTypographyProps={{ variant: 'body2', color: 'text.secondary' }}
         action={
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <StatCounters counters={statCounters} />
@@ -848,7 +850,7 @@ function ReadingDashboard() {
               variant="contained"
               color="primary"
               fullWidth
-              onClick={function() { navigate('/dicom/viewer/' + selectedStudy._id); }}
+              onClick={function() { navigate('/dicom/viewer/' + selectedStudy._id + '?previous=/radiology/reading'); }}
               disabled={!hasLinkedGridfsFiles(selectedStudy)}
               startIcon={<VisibilityIcon />}
               sx={{ mb: 2 }}

@@ -40,10 +40,13 @@ Meteor.methods({
 
     console.log('[radiology.createImagingOrder] Creating order for patient:', orderData.patientId);
 
-    // Build ServiceRequest
+    // Build ServiceRequest (profiled for radiology workflow)
     const serviceRequest = {
       resourceType: 'ServiceRequest',
       id: Random.id(),
+      meta: {
+        profile: ['https://github.com/node-on-fhir/radiology-workflow']
+      },
       status: 'active',
       intent: 'order',
       category: [{
@@ -239,10 +242,11 @@ Meteor.methods({
 
     const responseId = await QuestionnaireResponses.insertAsync(response);
 
-    // Update ServiceRequest with screening reference and note
+    // Update ServiceRequest: advance status and link screening response
     await ServiceRequests.updateAsync(
       { _id: screeningData.serviceRequestId },
       {
+        $set: { status: 'screening-complete' },
         $push: {
           supportingInfo: { reference: `QuestionnaireResponse/${responseId}` },
           note: {
@@ -279,6 +283,7 @@ Meteor.methods({
     console.log('[radiology.startProcedure] Starting procedure for order:', procedureData.serviceRequestId);
 
     const Procedures = Meteor.Collections?.Procedures || global.Collections?.Procedures;
+    const ServiceRequests = Meteor.Collections?.ServiceRequests || global.Collections?.ServiceRequests;
     if (!Procedures) {
       throw new Meteor.Error('collection-not-found', 'Procedures collection not available');
     }
@@ -334,6 +339,14 @@ Meteor.methods({
 
     const result = await Procedures.insertAsync(procedure);
     console.log('[radiology.startProcedure] Created Procedure:', result);
+
+    // Advance ServiceRequest status to in-progress
+    if (ServiceRequests) {
+      await ServiceRequests.updateAsync(
+        { _id: procedureData.serviceRequestId },
+        { $set: { status: 'in-progress' } }
+      );
+    }
 
     return result;
   },

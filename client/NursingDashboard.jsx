@@ -466,7 +466,12 @@ function NursingDashboard() {
                     </TableHead>
                     <TableBody>
                       {orders.map((order) => (
-                        <TableRow key={order._id} hover>
+                        <TableRow
+                          key={order._id}
+                          hover
+                          sx={{ cursor: 'pointer' }}
+                          onClick={() => navigate(`/radiology/tech?selected-patient=${patientId}`)}
+                        >
                           <TableCell>
                             {get(order, 'code.text', get(order, 'code.coding.0.display', 'Unknown'))}
                           </TableCell>
@@ -482,7 +487,10 @@ function NursingDashboard() {
                             <Tooltip title="View Order">
                               <IconButton
                                 size="small"
-                                onClick={() => navigate(`/service-requests/${order._id}`)}
+                                onClick={function(e) {
+                                  e.stopPropagation();
+                                  navigate(`/service-requests/${order._id}`);
+                                }}
                               >
                                 <VisibilityIcon fontSize="small" />
                               </IconButton>
