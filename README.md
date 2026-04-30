@@ -230,7 +230,7 @@ npmPackages/radiology-workflow/
 
 ## License
 
-Proprietary, All Rights Reserved
+Artistic 2.0
 
 
 ## References  
