@@ -1,6 +1,8 @@
 // npmPackages/radiology-workflow/server/hooks.js
 
 import { Meteor } from 'meteor/meteor';
+import { fetch } from 'meteor/fetch';
+import { Random } from 'meteor/random';
 import { get } from 'lodash';
 
 // =============================================================================
@@ -217,8 +219,25 @@ export function initRadiologyHooks() {
             patient: get(doc, 'subject.reference')
           });
 
-          // Future: Notify radiologist worklist when study becomes available
-          // Future: Update linked ServiceRequest status
+          // Publish FHIRcast event for ImagingStudy status change
+          const patientRef = get(doc, 'subject.reference', '');
+          const patientId = patientRef.replace('Patient/', '');
+          if (patientId) {
+            await publishFhircastEvent('imagingstudy-open', patientId, [
+              {
+                key: 'patient',
+                resource: { resourceType: 'Patient', id: patientId },
+              },
+              {
+                key: 'study',
+                resource: {
+                  resourceType: 'ImagingStudy',
+                  id: doc._id,
+                  status: doc.status,
+                },
+              },
+            ]);
+          }
 
         } catch (error) {
           console.error('[radiology] Error in ImagingStudy.after.update hook:', error);
@@ -319,8 +338,25 @@ export function initRadiologyHooks() {
             }
           }
 
-          // Future: Notify ordering provider
-          // Could use in-app notification or external messaging
+          // Publish FHIRcast event for new diagnostic report
+          const drPatientRef = get(doc, 'subject.reference', '');
+          const drPatientId = drPatientRef.replace('Patient/', '');
+          if (drPatientId) {
+            await publishFhircastEvent('DiagnosticReport-open', drPatientId, [
+              {
+                key: 'patient',
+                resource: { resourceType: 'Patient', id: drPatientId },
+              },
+              {
+                key: 'report',
+                resource: {
+                  resourceType: 'DiagnosticReport',
+                  id: doc._id,
+                  status: doc.status,
+                },
+              },
+            ]);
+          }
 
         } catch (error) {
           console.error('[radiology] Error in DiagnosticReport.after.insert hook:', error);
@@ -381,7 +417,27 @@ export function initRadiologyHooks() {
             }
           }
 
-          // Future: Notify ordering provider when report finalized or amended
+          // Publish FHIRcast event when report is finalized or amended
+          if (doc.status === 'final' || doc.status === 'amended') {
+            const drPatientRef = get(doc, 'subject.reference', '');
+            const drPatientId = drPatientRef.replace('Patient/', '');
+            if (drPatientId) {
+              await publishFhircastEvent('DiagnosticReport-open', drPatientId, [
+                {
+                  key: 'patient',
+                  resource: { resourceType: 'Patient', id: drPatientId },
+                },
+                {
+                  key: 'report',
+                  resource: {
+                    resourceType: 'DiagnosticReport',
+                    id: doc._id,
+                    status: doc.status,
+                  },
+                },
+              ]);
+            }
+          }
 
         } catch (error) {
           console.error('[radiology] Error in DiagnosticReport.after.update hook:', error);
@@ -431,6 +487,39 @@ export function initRadiologyHooks() {
 // =============================================================================
 // HELPER FUNCTIONS
 // =============================================================================
+
+/**
+ * Publish a FHIRcast event to the hub
+ * @param {string} eventName - e.g. 'imagingstudy-open' or 'DiagnosticReport-open'
+ * @param {string} patientId - Patient ID used as hub.topic
+ * @param {Array} context - FHIRcast event context array
+ */
+async function publishFhircastEvent(eventName, patientId, context) {
+  const hubUrl = get(Meteor, 'settings.private.fhircast.hubUrl',
+    get(Meteor, 'settings.public.fhircast.hubUrl',
+      'http://localhost:' + (process.env.PORT || '3100') + '/api/hub'));
+
+  const eventData = {
+    timestamp: new Date().toISOString(),
+    id: Random.id(),
+    event: {
+      'hub.topic': patientId,
+      'hub.event': eventName,
+      context: context,
+    },
+  };
+
+  try {
+    await fetch(hubUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(eventData),
+    });
+    console.log(`[radiology] Published FHIRcast ${eventName} event for patient ${patientId}`);
+  } catch (err) {
+    console.warn('[radiology] Failed to publish FHIRcast event:', err.message);
+  }
+}
 
 /**
  * Evaluate questionnaire responses for contraindications

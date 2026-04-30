@@ -393,34 +393,87 @@ Meteor.methods({
       }
     );
 
-    // Create ImagingStudy
-    const imagingStudy = {
-      resourceType: 'ImagingStudy',
-      id: Random.id(),
-      status: 'available',
-      subject: { reference: `Patient/${completionData.patientId}` },
-      started: new Date().toISOString(),
-      basedOn: [{ reference: `ServiceRequest/${completionData.serviceRequestId}` }],
-      procedureReference: { reference: `Procedure/${completionData.procedureId}` },
-      modality: [{
-        system: 'http://dicom.nema.org/resources/ontology/DCM',
-        code: completionData.modality
-      }],
-      numberOfSeries: completionData.numberOfSeries || 1,
-      numberOfInstances: completionData.numberOfInstances || 1
-    };
+    // Check if an ImagingStudy already exists for this ServiceRequest (from DICOM upload)
+    const serviceRequestRef = `ServiceRequest/${completionData.serviceRequestId}`;
+    const existingImagingStudy = await ImagingStudies.findOneAsync({
+      'basedOn.reference': serviceRequestRef
+    });
 
-    if (completionData.encounterId) {
-      imagingStudy.encounter = { reference: `Encounter/${completionData.encounterId}` };
+    let imagingStudyId;
+
+    if (existingImagingStudy) {
+      // Update existing ImagingStudy — preserve DICOM data (series, gridfsFileIds, etc.)
+      const updateFields = {
+        procedureReference: { reference: `Procedure/${completionData.procedureId}` },
+        modality: [{
+          system: 'http://dicom.nema.org/resources/ontology/DCM',
+          code: completionData.modality
+        }]
+      };
+
+      if (completionData.encounterId) {
+        updateFields.encounter = { reference: `Encounter/${completionData.encounterId}` };
+      }
+
+      if (completionData.description) {
+        updateFields.description = completionData.description;
+      }
+
+      // Fix series-level modality: replace 'OT' defaults with correct modality
+      const series = existingImagingStudy.series;
+      if (Array.isArray(series)) {
+        updateFields.series = series.map(function(s) {
+          if (get(s, 'modality.code') === 'OT') {
+            return {
+              ...s,
+              modality: {
+                system: 'http://dicom.nema.org/resources/ontology/DCM',
+                code: completionData.modality
+              }
+            };
+          }
+          return s;
+        });
+      }
+
+      await ImagingStudies.updateAsync(
+        { _id: existingImagingStudy._id },
+        { $set: updateFields }
+      );
+
+      imagingStudyId = existingImagingStudy._id;
+      console.log('[radiology.completeProcedure] Updated existing ImagingStudy:', imagingStudyId);
+    } else {
+      // No existing ImagingStudy — create new one
+      const imagingStudy = {
+        resourceType: 'ImagingStudy',
+        id: Random.id(),
+        status: 'available',
+        subject: { reference: `Patient/${completionData.patientId}` },
+        started: new Date().toISOString(),
+        basedOn: [{ reference: serviceRequestRef }],
+        procedureReference: { reference: `Procedure/${completionData.procedureId}` },
+        modality: [{
+          system: 'http://dicom.nema.org/resources/ontology/DCM',
+          code: completionData.modality
+        }],
+        numberOfSeries: completionData.numberOfSeries || 1,
+        numberOfInstances: completionData.numberOfInstances || 1
+      };
+
+      if (completionData.encounterId) {
+        imagingStudy.encounter = { reference: `Encounter/${completionData.encounterId}` };
+      }
+
+      if (completionData.description) {
+        imagingStudy.description = completionData.description;
+      }
+
+      imagingStudy._id = imagingStudy.id;
+
+      imagingStudyId = await ImagingStudies.insertAsync(imagingStudy);
+      console.log('[radiology.completeProcedure] Created new ImagingStudy:', imagingStudyId);
     }
-
-    if (completionData.description) {
-      imagingStudy.description = completionData.description;
-    }
-
-    imagingStudy._id = imagingStudy.id;
-
-    const imagingStudyId = await ImagingStudies.insertAsync(imagingStudy);
 
     // Update ServiceRequest to completed
     await ServiceRequests.updateAsync(
@@ -428,7 +481,7 @@ Meteor.methods({
       { $set: { status: 'completed' } }
     );
 
-    console.log('[radiology.completeProcedure] Created ImagingStudy:', imagingStudyId);
+    console.log('[radiology.completeProcedure] Completed procedure:', completionData.procedureId);
 
     return {
       procedureId: completionData.procedureId,
@@ -718,17 +771,46 @@ Meteor.methods({
       }];
     }
 
-    report._id = report.id;
+    // Check for existing report linked to this ImagingStudy
+    const existingReport = await DiagnosticReports.findOneAsync({
+      'imagingStudy.reference': `ImagingStudy/${reportData.imagingStudyId}`,
+      'category.coding.code': 'RAD'
+    });
 
-    const reportId = await DiagnosticReports.insertAsync(report);
+    let reportId;
+    if (existingReport) {
+      // Update existing report
+      reportId = existingReport._id;
+      report.id = reportId;
+      report._id = reportId;
+
+      await DiagnosticReports.updateAsync(
+        { _id: reportId },
+        { $set: {
+          status: report.status,
+          conclusion: report.conclusion,
+          conclusionCode: report.conclusionCode,
+          result: report.result,
+          performer: report.performer,
+          resultsInterpreter: report.resultsInterpreter,
+          issued: report.issued,
+          effectiveDateTime: report.effectiveDateTime,
+          presentedForm: report.presentedForm
+        }}
+      );
+      console.log('[radiology.signReport] Updated existing DiagnosticReport:', reportId);
+    } else {
+      // Insert new report
+      report._id = report.id;
+      reportId = await DiagnosticReports.insertAsync(report);
+      console.log('[radiology.signReport] Created new DiagnosticReport:', reportId);
+    }
 
     // Link report to Procedure
     await Procedures.updateAsync(
       { _id: reportData.procedureId },
       { $set: { report: [{ reference: `DiagnosticReport/${reportId}` }] } }
     );
-
-    console.log('[radiology.signReport] Created DiagnosticReport:', reportId);
 
     return reportId;
   },
