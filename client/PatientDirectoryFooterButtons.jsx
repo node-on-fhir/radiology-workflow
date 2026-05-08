@@ -8,7 +8,6 @@ import Button from '@mui/material/Button';
 
 import AssignmentIcon from '@mui/icons-material/Assignment';
 
-import { SubscribeButton } from '@node-on-fhir/fhircast-module';
 
 const footerRoutes = [
   { label: 'Order Catalog', path: '/radiology/order-entry', icon: AssignmentIcon }
@@ -19,7 +18,7 @@ function PatientDirectoryFooterButtons() {
   const location = useLocation();
 
   return (
-    <Box sx={{
+    <Box className="footer-buttons-radiology-workflow" sx={{
       display: 'flex',
       flexDirection: 'row',
       justifyContent: 'space-evenly',
@@ -33,6 +32,7 @@ function PatientDirectoryFooterButtons() {
         return (
           <Button
             key={route.path}
+            id={'radiology-workflow-' + route.label.toLowerCase().replace(/\s+/g, '-') + '-footer-btn'}
             variant={isActive ? 'contained' : 'text'}
             color={isActive ? 'secondary' : 'inherit'}
             size="small"
@@ -49,7 +49,6 @@ function PatientDirectoryFooterButtons() {
           </Button>
         );
       })}
-      <SubscribeButton />
     </Box>
   );
 }

@@ -11,6 +11,7 @@ import RadiologyToolsFooterButtons from './client/RadiologyToolsFooterButtons.js
 import PacioExamRoomFooterButtons from './client/PacioExamRoomFooterButtons.jsx';
 import PatientDirectoryFooterButtons from './client/PatientDirectoryFooterButtons.jsx';
 import OrderHistoryFooterButtons from './client/OrderHistoryFooterButtons.jsx';
+import AssignmentIcon from '@mui/icons-material/Assignment';
 import workflowConfig from './workflow.json';
 
 // =============================================================================
@@ -75,7 +76,8 @@ const FooterButtons = [
       '/international-patient-summary',
       '/fhir-graph',
       '/clinical-story',
-      '/timeline-editor'
+      '/timeline-editor',
+      '/timeline-vertical'
     ],
     element: <PatientViewFooterButtons />
   },
@@ -98,6 +100,20 @@ const FooterButtons = [
 ];
 
 // =============================================================================
+// PATIENTS DIRECTORY BUTTONS
+// =============================================================================
+
+const PatientsDirectoryButtons = [{
+  id: 'order-catalog',
+  label: 'ORDER CATALOG',
+  icon: <AssignmentIcon />,
+  color: 'primary',
+  onClick: function(patientId, patient, navigate) {
+    navigate('/radiology/order-entry');
+  }
+}];
+
+// =============================================================================
 // EXPORTS
 // =============================================================================
 
@@ -106,6 +122,7 @@ export {
   DynamicRoutes,
   SidebarWorkflows,
   FooterButtons,
+  PatientsDirectoryButtons,
   RadiologyHome,
   NursingDashboard,
   OrderCatalogBrowser,
@@ -123,5 +140,6 @@ export default {
   name: workflowConfig.name,
   routes: DynamicRoutes,
   sidebarItems: SidebarWorkflows,
-  footerButtons: FooterButtons
+  footerButtons: FooterButtons,
+  patientsDirectoryButtons: PatientsDirectoryButtons
 };

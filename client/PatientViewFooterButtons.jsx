@@ -11,21 +11,27 @@ import SummarizeIcon from '@mui/icons-material/Summarize';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import AutoStoriesIcon from '@mui/icons-material/AutoStories';
 import TimelineIcon from '@mui/icons-material/Timeline';
+import ViewTimelineIcon from '@mui/icons-material/ViewTimeline';
 
 const footerRoutes = [
   { label: 'Patient Chart', path: '/patient-chart', icon: DescriptionIcon },
   { label: 'IPS', path: '/international-patient-summary', icon: SummarizeIcon },
   { label: 'FHIR Graph', path: '/fhir-graph', icon: AccountTreeIcon },
   { label: 'Clinical Story', path: '/clinical-story', icon: AutoStoriesIcon },
-  { label: 'Timeline', path: '/timeline-editor', icon: TimelineIcon }
+  { label: 'Editor', path: '/timeline-editor', icon: TimelineIcon }
 ];
+
+// Conditionally add Chronology button if timelines package is loaded
+if (typeof Package !== 'undefined' && Package['symptomatic:timelines']) {
+  footerRoutes.push({ label: 'Chronology', path: '/timeline-vertical', icon: ViewTimelineIcon });
+}
 
 function PatientViewFooterButtons() {
   const navigate = useNavigate();
   const location = useLocation();
 
   return (
-    <Box sx={{
+    <Box className="footer-buttons-radiology-workflow" sx={{
       display: 'flex',
       flexDirection: 'row',
       justifyContent: 'space-evenly',
@@ -39,6 +45,7 @@ function PatientViewFooterButtons() {
         return (
           <Button
             key={route.path}
+            id={'radiology-workflow-' + route.label.toLowerCase().replace(/\s+/g, '-') + '-footer-btn'}
             variant={isActive ? 'contained' : 'text'}
             color={isActive ? 'secondary' : 'inherit'}
             size="small"

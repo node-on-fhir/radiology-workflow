@@ -17,7 +17,7 @@ function OrderHistoryFooterButtons() {
   const location = useLocation();
 
   return (
-    <Box sx={{
+    <Box className="footer-buttons-radiology-workflow" sx={{
       display: 'flex',
       flexDirection: 'row',
       justifyContent: 'space-evenly',
@@ -31,6 +31,7 @@ function OrderHistoryFooterButtons() {
         return (
           <Button
             key={route.path}
+            id={'radiology-workflow-' + route.label.toLowerCase().replace(/\s+/g, '-') + '-footer-btn'}
             variant={isActive ? 'contained' : 'text'}
             color={isActive ? 'secondary' : 'inherit'}
             size="small"
