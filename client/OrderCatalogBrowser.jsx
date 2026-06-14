@@ -37,7 +37,7 @@ import PatientSearchDialog from '/imports/components/PatientSearchDialog.jsx';
 import {
   RADIOLOGY_CATALOG,
   MODALITY_CODES
-} from '../../../packages/order-catalog/lib/RadiologyCatalog';
+} from '@node-on-fhir/order-catalog/lib/RadiologyCatalog';
 
 // =============================================================================
 // ORDER CATALOG BROWSER

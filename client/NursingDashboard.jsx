@@ -41,7 +41,7 @@ import AssignmentIcon from '@mui/icons-material/Assignment';
 import AddIcon from '@mui/icons-material/Add';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import VisibilityIcon from '@mui/icons-material/Visibility';
-import { RADIOLOGY_CATALOG } from '../../../packages/order-catalog/lib/RadiologyCatalog.js';
+import { RADIOLOGY_CATALOG } from '@node-on-fhir/order-catalog/lib/RadiologyCatalog';
 
 // =============================================================================
 // NURSING DASHBOARD - ORDER ENTRY
