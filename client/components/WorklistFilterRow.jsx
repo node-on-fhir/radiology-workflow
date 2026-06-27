@@ -2,8 +2,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  TableRow,
-  TableCell,
   TextField,
   Select,
   MenuItem,
@@ -11,95 +9,82 @@ import {
 } from '@mui/material';
 
 // =============================================================================
-// WORKLIST FILTER ROW - Per-column text inputs and select dropdowns
+// COLUMN FILTER CONTROL - Single per-column filter input (text or select)
 // =============================================================================
 //
-// Renders a table row with filter controls (text inputs or select dropdowns)
-// under each column header. Debounced 300ms for text inputs.
+// Rendered INSIDE each column header cell so the header and filter share one
+// row (no separate filter row). Text inputs are debounced 300ms; selects apply
+// immediately. The parent owns the canonical `filters` map.
+//
+//   col:      column definition ({ key, filterType, filterOptions })
+//   value:    current filter value for this column
+//   onChange: (key, value) => void
 // =============================================================================
 
-function WorklistFilterRow({ columns, filters, onFilterChange, hasExpandColumn }) {
-  const [localFilters, setLocalFilters] = useState(filters || {});
-  const debounceTimers = useRef({});
+function ColumnFilterControl({ col, value, onChange }) {
+  const [localValue, setLocalValue] = useState(value || '');
+  const debounceTimer = useRef(null);
 
   useEffect(function() {
-    setLocalFilters(filters || {});
-  }, [filters]);
+    setLocalValue(value || '');
+  }, [value]);
 
-  function handleTextChange(key, value) {
-    const updated = { ...localFilters, [key]: value };
-    setLocalFilters(updated);
-
-    // Debounce text input
-    if (debounceTimers.current[key]) {
-      clearTimeout(debounceTimers.current[key]);
+  function handleTextChange(next) {
+    setLocalValue(next);
+    if (debounceTimer.current) {
+      clearTimeout(debounceTimer.current);
     }
-    debounceTimers.current[key] = setTimeout(function() {
-      onFilterChange(updated);
+    debounceTimer.current = setTimeout(function() {
+      onChange(col.key, next);
     }, 300);
   }
 
-  function handleSelectChange(key, value) {
-    const updated = { ...localFilters, [key]: value };
-    setLocalFilters(updated);
-    onFilterChange(updated);
+  function handleSelectChange(next) {
+    setLocalValue(next);
+    onChange(col.key, next);
   }
 
+  if (!col.filterable) {
+    return null;
+  }
+
+  if (col.filterType === 'select') {
+    return (
+      <FormControl size="small" fullWidth variant="standard">
+        <Select
+          value={localValue}
+          onChange={function(e) { handleSelectChange(e.target.value); }}
+          onClick={function(e) { e.stopPropagation(); }}
+          displayEmpty
+          sx={{ fontSize: '0.75rem' }}
+        >
+          <MenuItem value=""><em>All</em></MenuItem>
+          {(col.filterOptions || []).map(function(opt) {
+            return (
+              <MenuItem key={opt.value} value={opt.value}>
+                {opt.label}
+              </MenuItem>
+            );
+          })}
+        </Select>
+      </FormControl>
+    );
+  }
+
+  // Default: text filter
   return (
-    <TableRow sx={{ '& .MuiTableCell-root': { py: 0.5, px: 1 } }}>
-      {hasExpandColumn && <TableCell key="__expand_filter__" />}
-      {columns.map(function(col) {
-        if (!col.filterable) {
-          return <TableCell key={col.key} />;
-        }
-
-        if (col.filterType === 'select') {
-          return (
-            <TableCell key={col.key}>
-              <FormControl size="small" fullWidth variant="standard">
-                <Select
-                  value={localFilters[col.key] || ''}
-                  onChange={function(e) {
-                    handleSelectChange(col.key, e.target.value);
-                  }}
-                  displayEmpty
-                  sx={{ fontSize: '0.75rem' }}
-                >
-                  <MenuItem value="">
-                    <em>All</em>
-                  </MenuItem>
-                  {(col.filterOptions || []).map(function(opt) {
-                    return (
-                      <MenuItem key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </MenuItem>
-                    );
-                  })}
-                </Select>
-              </FormControl>
-            </TableCell>
-          );
-        }
-
-        // Default: text filter
-        return (
-          <TableCell key={col.key}>
-            <TextField
-              size="small"
-              variant="standard"
-              placeholder="Filter..."
-              value={localFilters[col.key] || ''}
-              onChange={function(e) {
-                handleTextChange(col.key, e.target.value);
-              }}
-              inputProps={{ style: { fontSize: '0.75rem', padding: '2px 0' } }}
-              fullWidth
-            />
-          </TableCell>
-        );
-      })}
-    </TableRow>
+    <TextField
+      size="small"
+      variant="standard"
+      placeholder="Filter..."
+      value={localValue}
+      onChange={function(e) { handleTextChange(e.target.value); }}
+      onClick={function(e) { e.stopPropagation(); }}
+      inputProps={{ style: { fontSize: '0.75rem', padding: '2px 0' } }}
+      fullWidth
+    />
   );
 }
 
-export default WorklistFilterRow;
+export { ColumnFilterControl };
+export default ColumnFilterControl;

@@ -1,6 +1,6 @@
 // npmPackages/radiology-workflow/client/RadiologyHome.jsx
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Meteor } from 'meteor/meteor';
 import { get } from 'lodash';
@@ -14,10 +14,15 @@ import {
   Box,
   Alert,
   CircularProgress,
+  Collapse,
   Grid,
   Button,
   Divider,
-  Chip
+  Chip,
+  List,
+  ListItem,
+  ListItemText,
+  IconButton
 } from '@mui/material';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import MedicalServicesIcon from '@mui/icons-material/MedicalServices';
@@ -27,6 +32,9 @@ import ImageIcon from '@mui/icons-material/Image';
 import DescriptionIcon from '@mui/icons-material/Description';
 import StorageIcon from '@mui/icons-material/Storage';
 import FolderIcon from '@mui/icons-material/Folder';
+import CloudUploadIcon from '@mui/icons-material/CloudUpload';
+import CloseIcon from '@mui/icons-material/Close';
+import DeleteIcon from '@mui/icons-material/Delete';
 
 import { useRadiologyRole } from './hooks/useRadiologyRole.js';
 
@@ -58,6 +66,190 @@ function StatCard({ label, value, icon, color, loading }) {
         </Typography>
       </Card>
     </Grid>
+  );
+}
+
+// -----------------------------------------------------------------------------
+// DICOM UPLOAD PANEL (collapsible inline drag/drop)
+// -----------------------------------------------------------------------------
+//
+// Lightweight self-contained dropzone that posts files to the same
+// /api/dicom/upload endpoint used by the standalone /dicom/upload page.
+// Rendered inline (in a <Collapse>) so the technologist never leaves /radiology.
+// -----------------------------------------------------------------------------
+
+function DicomUploadPanel({ onClose }) {
+  const [files, setFiles] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const [results, setResults] = useState([]);
+  const [error, setError] = useState(null);
+
+  const handleFileSelect = function(event) {
+    setFiles(Array.from(event.target.files));
+    setResults([]);
+    setError(null);
+  };
+
+  const handleDrop = useCallback(function(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    setFiles(Array.from(event.dataTransfer.files));
+    setResults([]);
+    setError(null);
+  }, []);
+
+  const handleDragOver = useCallback(function(event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }, []);
+
+  const handleRemoveFile = function(index) {
+    setFiles(function(prev) { return prev.filter(function(_, i) { return i !== index; }); });
+  };
+
+  // Upload a single file to GridFS via the shared HTTP endpoint
+  const uploadFile = function(file) {
+    return new Promise(function(resolve, reject) {
+      const formData = new FormData();
+      formData.append('dicomFile', file);
+
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/dicom/upload');
+
+      const loginToken = localStorage.getItem('Meteor.loginToken');
+      if (loginToken) {
+        xhr.setRequestHeader('Authorization', 'Bearer ' + loginToken);
+      }
+
+      xhr.onload = function() {
+        if (xhr.status === 200) {
+          try { resolve(JSON.parse(xhr.responseText)); }
+          catch (e) { reject(new Error('Invalid response from server')); }
+        } else if (xhr.status === 401) {
+          reject(new Error('Unauthorized. Please log in and try again.'));
+        } else {
+          try {
+            const errBody = JSON.parse(xhr.responseText);
+            reject(new Error(errBody.error || 'Upload failed'));
+          } catch (e) {
+            reject(new Error('Upload failed with status ' + xhr.status));
+          }
+        }
+      };
+      xhr.onerror = function() { reject(new Error('Network error during upload')); };
+      xhr.send(formData);
+    });
+  };
+
+  const handleUpload = async function() {
+    if (files.length === 0) {
+      setError('Please select files to upload');
+      return;
+    }
+    setUploading(true);
+    setError(null);
+    const uploaded = [];
+    try {
+      for (let i = 0; i < files.length; i++) {
+        await uploadFile(files[i]);
+        uploaded.push(files[i].name);
+        setResults(uploaded.slice());
+      }
+      setFiles([]);
+    } catch (uploadError) {
+      console.error('[RadiologyHome] Upload error:', uploadError);
+      setError(uploadError.message || 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <Card sx={{ mb: 3, mt: 2 }}>
+      <CardHeader
+        avatar={<CloudUploadIcon color="primary" />}
+        title="Upload Images"
+        titleTypographyProps={{ variant: 'subtitle1' }}
+        action={
+          <IconButton onClick={onClose} size="small" aria-label="Close upload panel">
+            <CloseIcon fontSize="small" />
+          </IconButton>
+        }
+        sx={{ pb: 1 }}
+      />
+      <CardContent sx={{ pt: 0 }}>
+        <Box
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
+          onClick={function() {
+            const input = document.getElementById('radiology-home-file-input');
+            if (input) input.click();
+          }}
+          sx={{
+            border: '2px dashed',
+            borderColor: 'divider',
+            borderRadius: 2,
+            p: 4,
+            textAlign: 'center',
+            cursor: 'pointer',
+            '&:hover': { borderColor: 'primary.main', bgcolor: 'action.hover' }
+          }}
+        >
+          <CloudUploadIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
+          <Typography variant="body1" sx={{ color: 'text.primary' }}>
+            Drag and drop DICOM or video files here
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            or click to browse
+          </Typography>
+          <input
+            id="radiology-home-file-input"
+            type="file"
+            multiple
+            accept=".dcm,.dicom,.mp4"
+            onChange={handleFileSelect}
+            style={{ display: 'none' }}
+          />
+        </Box>
+
+        {files.length > 0 && (
+          <List dense sx={{ mt: 1 }}>
+            {files.map(function(file, index) {
+              return (
+                <ListItem
+                  key={file.name + index}
+                  secondaryAction={
+                    <IconButton edge="end" size="small" onClick={function() { handleRemoveFile(index); }} disabled={uploading}>
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  }
+                >
+                  <ListItemText primary={file.name} primaryTypographyProps={{ variant: 'body2' }} />
+                </ListItem>
+              );
+            })}
+          </List>
+        )}
+
+        {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
+        {results.length > 0 && (
+          <Alert severity="success" sx={{ mt: 2 }}>
+            Uploaded {results.length} file{results.length === 1 ? '' : 's'}.
+          </Alert>
+        )}
+
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mt: 2 }}>
+          <Button
+            variant="contained"
+            onClick={handleUpload}
+            disabled={uploading || files.length === 0}
+            startIcon={uploading ? <CircularProgress size={16} /> : <CloudUploadIcon />}
+          >
+            {uploading ? 'Uploading...' : 'Upload'}
+          </Button>
+        </Box>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -166,6 +358,7 @@ function RadiologyHome() {
   const [creatingReport, setCreatingReport] = useState(false);
   const [gridfsStats, setGridfsStats] = useState(null);
   const [gridfsLoading, setGridfsLoading] = useState(true);
+  const [uploadPanelOpen, setUploadPanelOpen] = useState(false);
 
   // ---------------------------------------------------------------------------
   // Fetch Statistics
@@ -561,7 +754,11 @@ function RadiologyHome() {
           </Button>
         </Grid>
         <Grid item>
-          <Button variant="text" onClick={() => navigate('/dicom/upload')}>
+          <Button
+            variant="text"
+            startIcon={<CloudUploadIcon />}
+            onClick={() => setUploadPanelOpen(function(prev) { return !prev; })}
+          >
             Upload Images
           </Button>
         </Grid>
@@ -586,6 +783,11 @@ function RadiologyHome() {
           </Button>
         </Grid>
       </Grid>
+
+      {/* Collapsible inline DICOM upload panel (toggled by "Upload Images") */}
+      <Collapse in={uploadPanelOpen} unmountOnExit>
+        <DicomUploadPanel onClose={function() { setUploadPanelOpen(false); }} />
+      </Collapse>
 
       {/* Package Info */}
       <Box

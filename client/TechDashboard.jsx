@@ -62,6 +62,7 @@ import InfoIcon from '@mui/icons-material/Info';
 import WorklistTable from './components/WorklistTable.jsx';
 import TatDisplay from './components/TatDisplay.jsx';
 import StatCounters from './components/StatCounters.jsx';
+import TabTiles from './components/TabTiles.jsx';
 import WorkflowDrawer from './components/WorkflowDrawer.jsx';
 import RowActionIcons from './components/RowActionIcons.jsx';
 import { LaunchAppsModal } from '/imports/components/LaunchAppsModal.jsx';
@@ -79,12 +80,15 @@ import { LaunchAppsModal } from '/imports/components/LaunchAppsModal.jsx';
 
 // Safety screening questions (simplified demo version)
 const SAFETY_QUESTIONS = [
-  { id: 'allergy', text: 'History of contrast allergy?', type: 'boolean' },
+  { id: 'allergy', text: 'History of contrast allergy?', type: 'boolean',
+    link: '/allergy-testing?back=radiology/tech', linkTooltip: 'View allergy testing' },
   { id: 'pregnancy', text: 'Pregnancy or possibility of pregnancy?', type: 'boolean' },
-  { id: 'implant', text: 'Metallic implants (pacemaker, clips, etc.)?', type: 'boolean' },
+  { id: 'implant', text: 'Metallic implants (pacemaker, clips, etc.)?', type: 'boolean',
+    link: '/implantable-devices?back=radiology/tech', linkTooltip: 'View implantable devices' },
   { id: 'kidney', text: 'History of kidney disease or dialysis?', type: 'boolean' },
   { id: 'claustrophobia', text: 'Claustrophobia (for MRI)?', type: 'boolean' },
-  { id: 'diabetes', text: 'Diabetes with metformin use?', type: 'boolean' }
+  { id: 'diabetes', text: 'Diabetes with metformin use?', type: 'boolean',
+    link: '/medication-management?back=radiology/tech', linkTooltip: 'View medication management' }
 ];
 
 // Tab definitions (key is used for ?tab= URL param)
@@ -198,6 +202,8 @@ function TechDashboard() {
     return 0;
   }, [searchParams]);
   const [density, setDensity] = useState('standard');
+  // Active stat-tile quick filter (null = none); set by clicking a stat tile.
+  const [activeStatKey, setActiveStatKey] = useState(null);
   const columnVisibility = useMemo(function() {
     var vis = Object.assign({}, COLUMN_DEFAULTS);
     Object.keys(COLUMN_PARAM_MAP).forEach(function(param) {
@@ -359,38 +365,49 @@ function TechDashboard() {
   }, [orders, procedures, imagingStudies]);
 
   // ---------------------------------------------------------------------------
-  // Tab-filtered data
+  // STAT counters — also serve as clickable quick filters (key + filter fn)
+  // ---------------------------------------------------------------------------
+  const statCounters = useMemo(function() {
+    const now = Date.now();
+    const isStat = function(o) { return o.priority === 'stat' || o.priority === 'asap'; };
+    const isUrgent = function(o) { return o.priority === 'urgent'; };
+    const isOver4h = function(o) {
+      return o.authoredOn && (now - new Date(o.authoredOn).getTime()) > 4 * 3600000;
+    };
+
+    return [
+      { key: 'stat', label: 'STAT', count: flattenedOrders.filter(isStat).length, color: 'error', filter: isStat },
+      { key: 'urgent', label: 'Urgent', count: flattenedOrders.filter(isUrgent).length, color: 'warning', filter: isUrgent },
+      { key: 'over4h', label: '>4h TAT', count: flattenedOrders.filter(isOver4h).length, color: 'error', filter: isOver4h },
+      // 'Total' has no filter — clicking it clears the active stat filter.
+      { key: 'total', label: 'Total', count: flattenedOrders.length, color: undefined }
+    ];
+  }, [flattenedOrders]);
+
+  // ---------------------------------------------------------------------------
+  // Tab-filtered data (tab filter AND active stat-tile filter; orthogonal)
   // ---------------------------------------------------------------------------
   const tabFilteredData = useMemo(function() {
     const tabDef = TECH_TABS[activeTab];
-    if (!tabDef) return flattenedOrders;
-    return flattenedOrders.filter(tabDef.filter);
-  }, [flattenedOrders, activeTab]);
-
-  // ---------------------------------------------------------------------------
-  // STAT counters
-  // ---------------------------------------------------------------------------
-  const statCounters = useMemo(function() {
-    let statCount = 0;
-    let urgentCount = 0;
-    let over4h = 0;
-    const now = Date.now();
-
-    flattenedOrders.forEach(function(order) {
-      if (order.priority === 'stat' || order.priority === 'asap') statCount++;
-      if (order.priority === 'urgent') urgentCount++;
-      if (order.authoredOn) {
-        const elapsed = now - new Date(order.authoredOn).getTime();
-        if (elapsed > 4 * 3600000) over4h++;
+    let rows = tabDef ? flattenedOrders.filter(tabDef.filter) : flattenedOrders;
+    if (activeStatKey) {
+      const statDef = statCounters.find(function(s) { return s.key === activeStatKey; });
+      if (statDef && typeof statDef.filter === 'function') {
+        rows = rows.filter(statDef.filter);
       }
-    });
+    }
+    return rows;
+  }, [flattenedOrders, activeTab, activeStatKey, statCounters]);
 
-    return [
-      { label: 'STAT', count: statCount, color: 'error' },
-      { label: 'Urgent', count: urgentCount, color: 'warning' },
-      { label: '>4h TAT', count: over4h, color: 'error' },
-      { label: 'Total', count: flattenedOrders.length, color: undefined }
-    ];
+  // Tab tiles — each TECH_TAB becomes a clickable count tile (acts as the tab)
+  const tabTiles = useMemo(function() {
+    return TECH_TABS.map(function(tab) {
+      return {
+        key: tab.key,
+        label: tab.label,
+        count: flattenedOrders.filter(tab.filter).length
+      };
+    });
   }, [flattenedOrders]);
 
   // ---------------------------------------------------------------------------
@@ -1245,7 +1262,6 @@ function TechDashboard() {
         subheaderTypographyProps={{ variant: 'body2', color: 'text.secondary' }}
         action={
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <StatCounters counters={statCounters} />
             <Tooltip title={density === 'compact' ? 'Standard density' : 'Compact density'}>
               <IconButton
                 size="small"
@@ -1264,31 +1280,29 @@ function TechDashboard() {
         </Alert>
       )}
 
-      {/* Tabs + Column Toggles */}
-      <Box sx={{ display: 'flex', alignItems: 'center', borderBottom: 1, borderColor: 'divider', px: 2, flexShrink: 0 }}>
-        <Tabs
-          value={activeTab}
-          onChange={function(e, v) {
+      {/* Tabs + Stat-filter tiles + Column Toggles (one combined row) */}
+      <Box sx={{ display: 'flex', alignItems: 'center', borderBottom: 1, borderColor: 'divider', px: 2, flexShrink: 0, gap: 1 }}>
+        <TabTiles
+          tabs={tabTiles}
+          activeIndex={activeTab}
+          onChange={function(v) {
             var tabKey = TECH_TABS[v] ? TECH_TABS[v].key : 'active';
             var newParams = new URLSearchParams(searchParams);
             newParams.set('tab', tabKey);
             setSearchParams(newParams, { replace: true });
           }}
-          sx={{
-            flex: 1,
-            minHeight: density === 'compact' ? 36 : 48,
-            '& .MuiTab-root': {
-              minHeight: density === 'compact' ? 36 : 48,
-              py: density === 'compact' ? 0 : 1,
-              textTransform: 'none',
-              fontSize: density === 'compact' ? '0.8rem' : '0.875rem'
-            }
+        />
+        <Divider orientation="vertical" flexItem sx={{ my: 1 }} />
+        <StatCounters
+          counters={statCounters}
+          activeKey={activeStatKey}
+          onTileClick={function(key) {
+            // Toggle: clicking the active tile (or 'total') clears the filter.
+            setActiveStatKey(function(prev) {
+              return (prev === key || key === 'total') ? null : key;
+            });
           }}
-        >
-          {TECH_TABS.map(function(tab, i) {
-            return <Tab key={i} label={tab.label} />;
-          })}
-        </Tabs>
+        />
         <Box sx={{ display: 'flex', gap: 0.5, ml: 'auto' }}>
           <Tooltip title="Patient Name">
             <IconButton size="small" onClick={function() { toggleColumn('patientDisplay'); }}
@@ -1374,25 +1388,37 @@ function TechDashboard() {
                 <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
                   {SAFETY_QUESTIONS.map(function(question) {
                     return (
-                      <FormControlLabel
-                        key={question.id}
-                        control={
-                          <Checkbox
-                            size="small"
-                            checked={!!screeningAnswers[question.id]}
-                            onChange={function(e) {
-                              setScreeningAnswers({
-                                ...screeningAnswers,
-                                [question.id]: e.target.checked
-                              });
-                            }}
-                          />
-                        }
-                        label={
-                          <Typography variant="body2">{question.text}</Typography>
-                        }
-                        sx={{ display: 'block', mb: 0.5 }}
-                      />
+                      <Box key={question.id} sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+                        <FormControlLabel
+                          sx={{ flex: 1, mr: 0 }}
+                          control={
+                            <Checkbox
+                              size="small"
+                              checked={!!screeningAnswers[question.id]}
+                              onChange={function(e) {
+                                setScreeningAnswers({
+                                  ...screeningAnswers,
+                                  [question.id]: e.target.checked
+                                });
+                              }}
+                            />
+                          }
+                          label={
+                            <Typography variant="body2">{question.text}</Typography>
+                          }
+                        />
+                        {question.link && (
+                          <Tooltip title={question.linkTooltip || 'More info'}>
+                            <IconButton
+                              size="small"
+                              aria-label={question.linkTooltip || 'More info'}
+                              onClick={function() { navigate(question.link); }}
+                            >
+                              <InfoIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                      </Box>
                     );
                   })}
                 </Paper>
@@ -1444,19 +1470,65 @@ function TechDashboard() {
                     </Button>
                   </Box>
                 ) : (
-                  <Box
-                    onDragOver={handleDragOver}
-                    onDragLeave={handleDragLeave}
-                    onDrop={handleDrop}
-                    sx={{
-                      borderRadius: 1,
-                      border: isDragOver ? '2px dashed' : '2px dashed transparent',
-                      borderColor: isDragOver ? 'primary.main' : 'transparent',
-                      boxShadow: isDragOver ? '0 0 15px 3px rgba(144,202,249,0.5)' : 'none',
-                      transition: 'border-color 0.2s, box-shadow 0.2s',
-                      p: isDragOver ? 1 : 0
-                    }}
-                  >
+                  <Box>
+                    {/* Hidden picker — uploads in-context (no navigation away) */}
+                    <input
+                      id="tech-acquisition-file-input"
+                      type="file"
+                      multiple
+                      accept=".dcm,.dicom"
+                      style={{ display: 'none' }}
+                      onChange={function(e) {
+                        var selected = Array.from(e.target.files).filter(function(f) {
+                          return f.name.toLowerCase().endsWith('.dcm') || f.name.toLowerCase().endsWith('.dicom');
+                        });
+                        if (selected.length > 0) {
+                          uploadDicomFiles(selected);
+                        }
+                        e.target.value = '';
+                      }}
+                    />
+
+                    {/* Big upload drop-zone tile (drag/drop + click to browse) */}
+                    <Box
+                      onDragOver={handleDragOver}
+                      onDragLeave={handleDragLeave}
+                      onDrop={handleDrop}
+                      onClick={function() {
+                        var input = document.getElementById('tech-acquisition-file-input');
+                        if (input) input.click();
+                      }}
+                      sx={{
+                        height: 360,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        textAlign: 'center',
+                        gap: 0.5,
+                        borderRadius: 2,
+                        cursor: 'pointer',
+                        mb: 2,
+                        border: '2px dashed',
+                        borderColor: isDragOver ? 'primary.main' : 'divider',
+                        bgcolor: isDragOver ? 'action.hover' : 'transparent',
+                        boxShadow: isDragOver ? '0 0 15px 3px rgba(144,202,249,0.5)' : 'none',
+                        transition: 'border-color 0.2s, box-shadow 0.2s, background-color 0.2s',
+                        '&:hover': { borderColor: 'primary.main', bgcolor: 'action.hover' }
+                      }}
+                    >
+                      <UploadIcon sx={{ fontSize: 56, color: 'text.secondary' }} />
+                      <Typography variant="subtitle1" sx={{ fontWeight: 600, color: 'text.primary' }}>
+                        Upload Images
+                      </Typography>
+                      <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                        Drop .dcm files here to upload
+                      </Typography>
+                      <Typography variant="caption" sx={{ color: 'text.disabled' }}>
+                        or click to browse
+                      </Typography>
+                    </Box>
+
                     {/* Upload progress */}
                     {uploadState.uploading && (
                       <Alert severity="info" sx={{ mb: 2 }} icon={<UploadIcon />}>
@@ -1487,41 +1559,22 @@ function TechDashboard() {
                       value={acquisitionNotes}
                       onChange={function(e) { setAcquisitionNotes(e.target.value); }}
                       multiline
-                      rows={2}
+                      rows={4}
                       fullWidth
                       size="small"
                       sx={{ mb: 2 }}
                     />
 
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                      <Button
-                        variant="outlined"
-                        fullWidth
-                        onClick={function() {
-                          const patientRef = get(selectedOrder, 'subject.reference', '');
-                          const patientId = patientRef.replace('Patient/', '');
-                          const serviceRequestId = get(selectedOrder, '_id', '');
-                          navigate('/dicom/upload?patient=' + encodeURIComponent(patientId) + '&servicerequest=' + encodeURIComponent(serviceRequestId));
-                        }}
-                        startIcon={<UploadIcon />}
-                      >
-                        Upload Images
-                      </Button>
-                      <Button
-                        variant="contained"
-                        color="success"
-                        fullWidth
-                        onClick={handleCompleteProcedure}
-                        disabled={submitting}
-                        startIcon={submitting ? <CircularProgress size={18} /> : <CheckCircleIcon />}
-                      >
-                        Complete Procedure
-                      </Button>
-                    </Box>
-
-                    <Typography variant="caption" sx={{ color: 'text.disabled', textAlign: 'center', display: 'block', mt: 1 }}>
-                      Drop .dcm files here to upload
-                    </Typography>
+                    <Button
+                      variant="contained"
+                      color="success"
+                      fullWidth
+                      onClick={handleCompleteProcedure}
+                      disabled={submitting}
+                      startIcon={submitting ? <CircularProgress size={18} /> : <CheckCircleIcon />}
+                    >
+                      Complete Procedure
+                    </Button>
                   </Box>
                 )}
               </Box>
@@ -1538,27 +1591,36 @@ function TechDashboard() {
                   Images are now available for radiologist review.
                 </Typography>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                  <Button
-                    variant="outlined"
-                    fullWidth
-                    onClick={function() { setSelectedOrder(null); }}
-                  >
-                    Return to Worklist
-                  </Button>
-                  <Button
-                    variant="contained"
-                    fullWidth
-                    disabled={!selectedOrder || !selectedOrder.imagingStudyId}
-                    onClick={function() { navigate('/dicom/viewer/' + selectedOrder.imagingStudyId); }}
-                  >
-                    View Study Images
-                  </Button>
+                  {/* View the ImagingStudy created/linked for this order (reactive) */}
+                  {selectedStudyId && (
+                    <Button
+                      variant="contained"
+                      fullWidth
+                      onClick={function() { navigate('/dicom/viewer/' + selectedStudyId); }}
+                    >
+                      View Images
+                    </Button>
+                  )}
                   <Button
                     variant="outlined"
                     fullWidth
                     onClick={function() { navigate('/dicom/studies'); }}
                   >
                     Browse Studies
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    fullWidth
+                    onClick={function() { setSelectedOrder(null); }}
+                  >
+                    Return to Technologist Worklist
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    fullWidth
+                    onClick={function() { navigate('/radiology/reading'); }}
+                  >
+                    View Radiologist Worklist
                   </Button>
                 </Box>
               </Box>

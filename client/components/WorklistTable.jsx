@@ -18,7 +18,7 @@ import {
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 import { useTheme, alpha } from '@mui/material/styles';
-import WorklistFilterRow from './WorklistFilterRow.jsx';
+import { ColumnFilterControl } from './WorklistFilterRow.jsx';
 import WorklistToolbar from './WorklistToolbar.jsx';
 
 // =============================================================================
@@ -51,14 +51,15 @@ function WorklistTable({
   onRefresh,
   highlightRow,   // (row) => boolean, for STAT row highlighting
   density = 'compact',
-  renderExpandedContent   // (row) => ReactNode, enables accordion rows
+  renderExpandedContent,   // (row) => ReactNode, enables accordion rows
+  defaultFilters   // { [colKey]: value } initial filter values
 }) {
   const theme = useTheme();
 
   // -------------------------------------------------------------------------
   // Local state
   // -------------------------------------------------------------------------
-  const [filters, setFilters] = useState({});
+  const [filters, setFilters] = useState(defaultFilters || {});
   const [sortKey, setSortKey] = useState(null);
   const [sortDirection, setSortDirection] = useState('asc');
   const [page, setPage] = useState(0);
@@ -125,8 +126,12 @@ function WorklistTable({
     }
   }
 
-  function handleFilterChange(newFilters) {
-    setFilters(newFilters);
+  function setColumnFilter(key, value) {
+    setFilters(function(prev) {
+      const updated = Object.assign({}, prev);
+      updated[key] = value;
+      return updated;
+    });
     setPage(0);
   }
 
@@ -142,8 +147,6 @@ function WorklistTable({
   // -------------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------------
-  const hasFilterableColumns = columns.some(function(c) { return c.filterable; });
-
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <TableContainer sx={{
@@ -183,7 +186,7 @@ function WorklistTable({
                 return (
                   <TableCell
                     key={col.key}
-                    sx={{ width: col.width || 'auto', minWidth: col.minWidth || 'auto' }}
+                    sx={{ width: col.width || 'auto', minWidth: col.minWidth || 'auto', verticalAlign: 'top' }}
                   >
                     {col.sortable ? (
                       <TableSortLabel
@@ -197,18 +200,20 @@ function WorklistTable({
                     ) : (
                       col.label
                     )}
+                    {/* Filter control merged into the header cell */}
+                    {col.filterable && (
+                      <Box sx={{ mt: 0.5, fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
+                        <ColumnFilterControl
+                          col={col}
+                          value={filters[col.key]}
+                          onChange={setColumnFilter}
+                        />
+                      </Box>
+                    )}
                   </TableCell>
                 );
               })}
             </TableRow>
-            {hasFilterableColumns && (
-              <WorklistFilterRow
-                columns={columns}
-                filters={filters}
-                onFilterChange={handleFilterChange}
-                hasExpandColumn={!!renderExpandedContent}
-              />
-            )}
           </TableHead>
           <TableBody>
             {isLoading ? (

@@ -86,7 +86,11 @@ const FooterButtons = [
     element: <RadiologyToolsFooterButtons />
   },
   {
-    pathname: '/pacio-exam-room',
+    // Explicit routes (substring match in Footer.jsx). The bare /radiology dashboard is
+    // intentionally excluded — it has its own on-page links. On /radiology/tech and
+    // /radiology/reading this wins over the earlier RadiologyTools entry (last match wins);
+    // /radiology/order-history is retained by the later OrderHistory entry.
+    pathname: ['/pacio-exam-room', '/radiology/order-entry', '/radiology/tech', '/radiology/reading'],
     element: <PacioExamRoomFooterButtons />
   },
   {

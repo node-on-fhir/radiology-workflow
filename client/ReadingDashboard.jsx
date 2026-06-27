@@ -53,6 +53,7 @@ import WorklistTable from './components/WorklistTable.jsx';
 import TatDisplay from './components/TatDisplay.jsx';
 import RowActionIcons from './components/RowActionIcons.jsx';
 import StatCounters from './components/StatCounters.jsx';
+import TabTiles from './components/TabTiles.jsx';
 import WorkflowDrawer from './components/WorkflowDrawer.jsx';
 import { LaunchAppsModal } from '/imports/components/LaunchAppsModal.jsx';
 
@@ -150,6 +151,8 @@ function ReadingDashboard() {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [activeTab, setActiveTab] = useState(0);
+  // Active stat-tile quick filter (null = none); set by clicking a stat tile.
+  const [activeStatKey, setActiveStatKey] = useState(null);
   const [density, setDensity] = useState('standard');
   const [launchModalOpen, setLaunchModalOpen] = useState(false);
   const [launchPatient, setLaunchPatient] = useState(null);
@@ -271,38 +274,50 @@ function ReadingDashboard() {
   }, [studies, reportedStudyIds, inProgressStudyIds, serviceRequestMap, reportMap]);
 
   // ---------------------------------------------------------------------------
-  // Tab-filtered data
+  // STAT counters — also serve as clickable quick filters (key + filter fn)
+  // ---------------------------------------------------------------------------
+  const statCounters = useMemo(function() {
+    const now = Date.now();
+    const isUnread = function(s) { return s._readingStatus === 'unread'; };
+    const isStat = function(s) { return s.priority === 'stat' || s.priority === 'asap'; };
+    const isOver4h = function(s) {
+      return s.started && s._readingStatus === 'unread'
+        && (now - new Date(s.started).getTime()) > 4 * 3600000;
+    };
+
+    return [
+      { key: 'unread', label: 'Unread', count: flattenedStudies.filter(isUnread).length, color: 'info', filter: isUnread },
+      { key: 'stat', label: 'STAT', count: flattenedStudies.filter(isStat).length, color: 'error', filter: isStat },
+      { key: 'over4h', label: '>4h TAT', count: flattenedStudies.filter(isOver4h).length, color: 'error', filter: isOver4h },
+      // 'Total' has no filter — clicking it clears the active stat filter.
+      { key: 'total', label: 'Total', count: flattenedStudies.length, color: undefined }
+    ];
+  }, [flattenedStudies]);
+
+  // ---------------------------------------------------------------------------
+  // Tab-filtered data (tab filter AND active stat-tile filter; orthogonal)
   // ---------------------------------------------------------------------------
   const tabFilteredData = useMemo(function() {
     const tabDef = READING_TABS[activeTab];
-    if (!tabDef) return flattenedStudies;
-    return flattenedStudies.filter(tabDef.filter);
-  }, [flattenedStudies, activeTab]);
-
-  // ---------------------------------------------------------------------------
-  // STAT counters
-  // ---------------------------------------------------------------------------
-  const statCounters = useMemo(function() {
-    let unreadCount = 0;
-    let statCount = 0;
-    let over4h = 0;
-    const now = Date.now();
-
-    flattenedStudies.forEach(function(study) {
-      if (study._readingStatus === 'unread') unreadCount++;
-      if (study.priority === 'stat' || study.priority === 'asap') statCount++;
-      if (study.started && study._readingStatus === 'unread') {
-        const elapsed = now - new Date(study.started).getTime();
-        if (elapsed > 4 * 3600000) over4h++;
+    let rows = tabDef ? flattenedStudies.filter(tabDef.filter) : flattenedStudies;
+    if (activeStatKey) {
+      const statDef = statCounters.find(function(s) { return s.key === activeStatKey; });
+      if (statDef && typeof statDef.filter === 'function') {
+        rows = rows.filter(statDef.filter);
       }
-    });
+    }
+    return rows;
+  }, [flattenedStudies, activeTab, activeStatKey, statCounters]);
 
-    return [
-      { label: 'Unread', count: unreadCount, color: 'info' },
-      { label: 'STAT', count: statCount, color: 'error' },
-      { label: '>4h TAT', count: over4h, color: 'error' },
-      { label: 'Total', count: flattenedStudies.length, color: undefined }
-    ];
+  // Tab tiles — each READING_TAB becomes a clickable count tile (acts as the tab)
+  const tabTiles = useMemo(function() {
+    return READING_TABS.map(function(tab) {
+      return {
+        key: tab.label,
+        label: tab.label,
+        count: flattenedStudies.filter(tab.filter).length
+      };
+    });
   }, [flattenedStudies]);
 
   // ---------------------------------------------------------------------------
@@ -762,7 +777,6 @@ function ReadingDashboard() {
         subheaderTypographyProps={{ variant: 'body2', color: 'text.secondary' }}
         action={
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <StatCounters counters={statCounters} />
             <Tooltip title={density === 'compact' ? 'Standard density' : 'Compact density'}>
               <IconButton
                 size="small"
@@ -787,28 +801,25 @@ function ReadingDashboard() {
         </Alert>
       )}
 
-      {/* Tabs */}
-      <Tabs
-        value={activeTab}
-        onChange={function(e, v) { setActiveTab(v); }}
-        sx={{
-          minHeight: density === 'compact' ? 36 : 48,
-          borderBottom: 1,
-          borderColor: 'divider',
-          px: 2,
-          flexShrink: 0,
-          '& .MuiTab-root': {
-            minHeight: density === 'compact' ? 36 : 48,
-            py: density === 'compact' ? 0 : 1,
-            textTransform: 'none',
-            fontSize: density === 'compact' ? '0.8rem' : '0.875rem'
-          }
-        }}
-      >
-        {READING_TABS.map(function(tab, i) {
-          return <Tab key={i} label={tab.label} />;
-        })}
-      </Tabs>
+      {/* Tabs + Stat-filter tiles (one combined row) */}
+      <Box sx={{ borderBottom: 1, borderColor: 'divider', px: 2, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 1 }}>
+        <TabTiles
+          tabs={tabTiles}
+          activeIndex={activeTab}
+          onChange={function(v) { setActiveTab(v); }}
+        />
+        <Divider orientation="vertical" flexItem sx={{ my: 1 }} />
+        <StatCounters
+          counters={statCounters}
+          activeKey={activeStatKey}
+          onTileClick={function(key) {
+            // Toggle: clicking the active tile (or 'total') clears the filter.
+            setActiveStatKey(function(prev) {
+              return (prev === key || key === 'total') ? null : key;
+            });
+          }}
+        />
+      </Box>
 
       {/* Worklist table */}
       <Box
