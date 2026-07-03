@@ -5,6 +5,8 @@ import { check, Match } from 'meteor/check';
 import { get } from 'lodash';
 import { Random } from 'meteor/random';
 
+const log = (Meteor.Logger ? Meteor.Logger.for('radiology-methods') : console);
+
 // =============================================================================
 // RADIOLOGY WORKFLOW METHODS (Meteor v3 Async Pattern)
 // =============================================================================
@@ -38,7 +40,7 @@ Meteor.methods({
       throw new Meteor.Error('not-authorized', 'You must be logged in');
     }
 
-    console.log('[radiology.createImagingOrder] Creating order for patient:', orderData.patientId);
+    log.debug('Creating order for patient:', { patientId: orderData.patientId });
 
     // Build ServiceRequest (profiled for radiology workflow)
     const serviceRequest = {

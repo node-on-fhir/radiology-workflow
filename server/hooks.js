@@ -5,6 +5,8 @@ import { fetch } from 'meteor/fetch';
 import { Random } from 'meteor/random';
 import { get } from 'lodash';
 
+const log = (Meteor.Logger ? Meteor.Logger.for('radiology-hooks') : console);
+
 // =============================================================================
 // COLLECTION HOOKS FOR RADIOLOGY WORKFLOW AUTOMATION
 // =============================================================================
@@ -515,7 +517,7 @@ async function publishFhircastEvent(eventName, patientId, context) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(eventData),
     });
-    console.log(`[radiology] Published FHIRcast ${eventName} event for patient ${patientId}`);
+    log.debug('Published FHIRcast event for patient', { eventName, patientId });
   } catch (err) {
     console.warn('[radiology] Failed to publish FHIRcast event:', err.message);
   }

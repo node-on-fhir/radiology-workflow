@@ -39,6 +39,8 @@ import {
   MODALITY_CODES
 } from '@node-on-fhir/order-catalog/lib/RadiologyCatalog';
 
+const log = (Meteor.Logger ? Meteor.Logger.for('OrderCatalogBrowser') : console);
+
 // =============================================================================
 // ORDER CATALOG BROWSER
 // =============================================================================
@@ -163,7 +165,7 @@ function OrderCatalogBrowser() {
 
   async function createOrderForPatient(patient, procedure) {
     if (!procedure) {
-      console.warn('[OrderCatalogBrowser] No procedure selected, setting patient without order');
+      console.warn('[OrderCatalogBrowser] No procedure selected, setting patient without order'); // phi-audit: ok
       Session.set('selectedPatient', patient);
       Session.set('selectedPatientId', get(patient, 'id'));
       setPatientDialogOpen(false);
@@ -185,7 +187,7 @@ function OrderCatalogBrowser() {
         priority: 'routine'
       });
 
-      console.log('[OrderCatalogBrowser] Order created for patient:', get(patient, 'id'), 'procedure:', procedure.display);
+      log.debug('Order created for patient:', { patientId: get(patient, 'id'), procedure: procedure.display });
 
       // Set Session after order creation so Order History sees the order immediately
       Session.set('selectedPatient', patient);

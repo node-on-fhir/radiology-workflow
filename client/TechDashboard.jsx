@@ -67,6 +67,8 @@ import WorkflowDrawer from './components/WorkflowDrawer.jsx';
 import RowActionIcons from './components/RowActionIcons.jsx';
 import { LaunchAppsModal } from '/imports/components/LaunchAppsModal.jsx';
 
+const log = (Meteor.Logger ? Meteor.Logger.for('TechDashboard') : console);
+
 // =============================================================================
 // TECH DASHBOARD - SAFETY SCREENING & IMAGE ACQUISITION
 // =============================================================================
@@ -1175,7 +1177,7 @@ function TechDashboard() {
                   // patients.findOne looks up by _id; the reference may contain
                   // a FHIR id instead. Fall back to a minimal patient object so
                   // the modal can still open.
-                  console.warn('[TechDashboard] patients.findOne returned null for', patientId, '- using fallback');
+                  log.warn('patients.findOne returned null for patientId - using fallback', { patientId });
                   setLaunchPatient({
                     _id: patientId,
                     id: patientId,

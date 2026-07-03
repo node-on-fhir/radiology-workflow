@@ -57,6 +57,8 @@ import TabTiles from './components/TabTiles.jsx';
 import WorkflowDrawer from './components/WorkflowDrawer.jsx';
 import { LaunchAppsModal } from '/imports/components/LaunchAppsModal.jsx';
 
+const log = (Meteor.Logger ? Meteor.Logger.for('ReadingDashboard') : console);
+
 // =============================================================================
 // READING DASHBOARD - RADIOLOGIST INTERPRETATION & REPORTING
 // =============================================================================
@@ -626,19 +628,19 @@ function ReadingDashboard() {
     const patientId = patientRef.replace('Patient/', '');
 
     if (!patientId) {
-      console.warn('[ReadingDashboard] No patient ID found');
+      console.warn('[ReadingDashboard] No patient ID found'); // phi-audit: ok
       return;
     }
 
     Meteor.call('patients.findOne', patientId, function(error, patient) {
       if (error) {
-        console.error('[ReadingDashboard] Error fetching patient:', error);
+        console.error('[ReadingDashboard] Error fetching patient:', error); // phi-audit: ok
         return;
       }
       if (patient) {
         Session.set('selectedPatient', patient);
         Session.set('selectedPatientId', patient.id);
-        console.log('[ReadingDashboard] Selected patient:', patient.id);
+        log.debug('Selected patient:', { patientId: patient.id });
       }
     });
   }
@@ -721,7 +723,7 @@ function ReadingDashboard() {
                 if (patient) {
                   setLaunchPatient(patient);
                 } else {
-                  console.warn('[ReadingDashboard] patients.findOne returned null for', patientId, '- using fallback');
+                  log.warn('patients.findOne returned null for patientId - using fallback', { patientId });
                   setLaunchPatient({
                     _id: patientId,
                     id: patientId,
