@@ -6,8 +6,7 @@ import { useTracker } from 'meteor/react-meteor-data';
 import { Meteor } from 'meteor/meteor';
 import { Session } from 'meteor/session';
 import { get } from 'lodash';
-import dicomParser from 'dicom-parser';
-import { extractAllDicomMetadata } from '/imports/ui/DICOM/utils/DicomFhirMapping';
+import { extractAllDicomMetadataFromArrayBuffer, flattenDicomMetadataForGridFS } from '/imports/ui/DICOM/utils/DcmjsMetadata';
 import {
   Container,
   Box,
@@ -946,12 +945,13 @@ function TechDashboard() {
       var file = files[i];
       try {
         var arrayBuffer = await file.arrayBuffer();
-        var dicomMetadata = null;
-        try {
-          var dataSet = dicomParser.parseDicom(new Uint8Array(arrayBuffer));
-          dicomMetadata = extractAllDicomMetadata(dataSet);
-        } catch (parseErr) {
-          console.warn('[TechDashboard] Could not parse DICOM:', file.name, parseErr);
+        // Flat shape is what POST /api/dicom/upload persists into dicom.files
+        // (the nested shape previously sent here never populated metadata.*)
+        var dicomMetadata = flattenDicomMetadataForGridFS(
+          extractAllDicomMetadataFromArrayBuffer(arrayBuffer)
+        );
+        if (!dicomMetadata) {
+          console.warn('[TechDashboard] Could not parse DICOM:', file.name);
         }
 
         var uploadResult = await uploadFileToGridFS(file, dicomMetadata);
