@@ -34,7 +34,7 @@ function PatientDirectoryFooterButtons() {
             key={route.path}
             id={'radiology-workflow-' + route.label.toLowerCase().replace(/\s+/g, '-') + '-footer-btn'}
             variant={isActive ? 'contained' : 'text'}
-            color={isActive ? 'secondary' : 'inherit'}
+            color="inherit"
             size="small"
             startIcon={<IconComponent />}
             onClick={function() { navigate(route.path); }}
@@ -42,7 +42,15 @@ function PatientDirectoryFooterButtons() {
               textTransform: 'none',
               minWidth: 0,
               px: 1.5,
-              fontSize: '0.75rem'
+              fontSize: '0.75rem',
+              // Active route: white pill with footer-background-colored text
+              // (the footer paints the appbar navy in BOTH light and dark
+              // mode, so secondary/purple never fit)
+              ...(isActive && {
+                bgcolor: '#ffffff',
+                color: 'primary.main',
+                '&:hover': { bgcolor: 'rgba(255, 255, 255, 0.85)' }
+              })
             }}
           >
             {route.label}
